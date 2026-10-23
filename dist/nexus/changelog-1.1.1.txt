@@ -1,0 +1,2 @@
+1.1.1
+- Fixed: after leaving a server or world and joining another, map teleport could wrongly say the new server does not run Embervale Teleport.
