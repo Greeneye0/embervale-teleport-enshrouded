@@ -1,8 +1,15 @@
 #pragma once
 #include "countdown.h"
 #include <charconv>
+#include <cstdint>
 #include <string_view>
 namespace teleport {
+// Chat entry type that carries the protocol lines. The game uses 0-4 (0 = player chat, 1-3 = pings
+// and notices, 4 = system text); every server relays other values unchanged and the chat window
+// does not draw them, so players and servers without the mod never see these lines.
+inline constexpr uint8_t kChatType=255;
+// Sent once by a remote client after joining; a modded host answers with kHelloReply.
+inline constexpr std::string_view kHello="/mth1",kHelloReply="/mts1 0 hello";
 struct Request { uint64_t nonce{}; Destination position{}; };
 inline bool ParseRequest(std::string_view text, Request& out) {
     if (!text.starts_with("/mt1 ") || text.size()>96) return false;

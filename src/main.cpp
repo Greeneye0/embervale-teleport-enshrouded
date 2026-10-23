@@ -4,9 +4,12 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <string>
+#include <string_view>
 #include "greeneye.h"
 #include "countdown.h"
 #include "travel.h"
+#include "protocol.h"
 #include "popup.h"
 #include "identity.h"
 #include "journey.h"
@@ -46,6 +49,23 @@ bool Cursor(float& x,float& y) {
     POINT p{}; RECT r{};
     if(pid!=GetCurrentProcessId()||!GetCursorPos(&p)||!ScreenToClient(w,&p)||!GetClientRect(w,&r)||r.right<=0||r.bottom<=0||p.x<0||p.y<0||p.x>=r.right||p.y>=r.bottom) return false;
     x=p.x*(1080.f/r.bottom); y=p.y*(1080.f/r.bottom); return true;
+}
+void SendLine(void* client,std::string_view text) {
+    alignas(8) uint8_t command[0x410]{};command[0]=0x74;command[1]=teleport::kChatType;
+    memcpy(command+2,text.data(),text.size());at<uint16_t>(command,0x402)=uint16_t(text.size());dispatch(client,command);
+}
+// A remote host is asked once per world whether it runs the mod. Until it answers, the client
+// sends no protocol lines: on a host without the mod they would show up as player chat.
+enum class HostMod {present,checking,absent};
+struct Link {void* client{};void* world{};uint64_t helloAt{},deadline{};bool asked{},absent{};} link;
+HostMod CheckHost(void* client,void* currentWorld) {
+    if(teleport::travel::HostsWorld()||teleport::travel::HostAnswered())return HostMod::present;
+    auto now=GetTickCount64();
+    if(link.client!=client||link.world!=currentWorld)link={client,currentWorld,now+3000,now+15000};
+    if(!link.asked&&now>=link.helloAt){link.asked=true;SendLine(client,teleport::kHello);Log("Map Teleport: asking the host whether it runs Embervale Teleport");}
+    if(now<link.deadline)return HostMod::checking;
+    if(!link.absent){link.absent=true;Log("Map Teleport: host did not answer; remote teleport off for this world");}
+    return HostMod::absent;
 }
 void Cancel(const char* reason="state reset") {
     if(countdown.active) {char message[160];sprintf_s(message,"Map Teleport: hold ended (%s), elapsed=%llu ms",reason,GetTickCount64()-countdown.started);Log(message);}
@@ -113,6 +133,14 @@ void EndFrame(void* app) {
     else if(submitted==teleport::travel::Submission::rejected) {
         watching={};teleport::popup::Show("Embervale Teleport Services","The host is busy or teleporting is unavailable. Please try again shortly.",4000);return;
     } else {
+        auto hostMod=CheckHost(client,at<void*>(client,0x47d4e0));
+        if(hostMod!=HostMod::present){
+            watching={};
+            teleport::popup::Show("Embervale Teleport Services",hostMod==HostMod::checking?
+                "Still checking whether this server runs Embervale Teleport. Please try again in a few seconds.":
+                "This server does not run Embervale Teleport, so map teleport is unavailable here. The server needs the mod installed too.",6000);
+            return;
+        }
         auto account=teleport::LocalAccount();
         if(!account){watching={};teleport::popup::Show("Embervale Teleport Services","Could not identify this player's account. Teleport cancelled.",5000);return;}
         static uint64_t lastNonce=0;lastNonce=now>lastNonce?now:lastNonce+1;
@@ -120,9 +148,7 @@ void EndFrame(void* app) {
         teleport::travel::TrackRemote(watching.nonce,account);
         char text[96];int len=sprintf_s(text,"/mt1 %llu %lld %lld",watching.nonce,target.x,target.z);
         if(len<=0)return;
-        alignas(8) uint8_t command[0x410]{};command[0]=0x74;
-        memcpy(command+2,text,size_t(len));at<uint16_t>(command,0x402)=uint16_t(len);
-        dispatch(client,command);
+        SendLine(client,{text,size_t(len)});
     }
     // Shift-only confirmation needs no Ctrl-release delay before returning to play.
     alignas(8) uint8_t openPlay[0x410]{};openPlay[0]=0x01;openPlay[1]=1;dispatch(client,openPlay);
@@ -136,7 +162,8 @@ void StatusFrame(void* app) {
     if(!currentWorld){watching={};popup::Clear();return;}
     uint32_t entity=(at<uint32_t>(current,0x466b44)&0x3f)+1;
     if(watching.nonce&&(watching.client!=current||watching.world!=currentWorld)){watching={};travel::TrackRemote(0,LocalAccount());popup::Clear();}
-    auto send=[&](const char* text){alignas(8) uint8_t command[0x410]{};command[0]=0x74;auto len=strlen(text);memcpy(command+2,text,len);at<uint16_t>(command,0x402)=uint16_t(len);dispatch(current,command);};
+    auto hostMod=CheckHost(current,currentWorld);
+    auto send=[&](const char* text){if(hostMod==HostMod::present)SendLine(current,text);};
     if(!watching.nonce) {
         auto local=travel::LocalStatus(entity),remote=travel::RemoteStatus();
         auto active=local.protection&&!Finished(local)?local:remote;

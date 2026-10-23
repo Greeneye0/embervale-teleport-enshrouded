@@ -53,7 +53,9 @@ dbgcore.dll and the greeneye folder too.
 GOOD TO KNOW
 ------------
 - Single player, hosting your own game, and dedicated servers (install it on the server
-  too).
+  too). Players without the mod can play on the same server and notice nothing.
+- On a server without the mod, map teleport is simply unavailable: Shift + hold tells you
+  so, and nothing shows up in chat.
 - dbgcore.dll is the Greeneye Loader: it loads the mods in the greeneye folder (Find,
   Quick Deposit, Continue and others share it) and forwards everything else to Windows'
   own dbgcore.dll.

@@ -44,6 +44,7 @@ bool boundsKnown=false;
 Entity entityOf{}; Dirty dirty{}; TerrainRay ray{}; Receive receive{}; Append append{};
 std::atomic<void*> client{};
 std::atomic<void*> server{};
+std::atomic<bool> hostAnswered{};
 std::atomic<bool> paused{false},faulted{false};
 std::mutex lock;
 enum class Stage { none, resolving, injecting, armed, applying, cancelling, journey };
@@ -425,7 +426,7 @@ void BoundsHook(void* manager,void* configuration) {
 // 0: ordinary chat, 1: replace on host, 2: consume on client/host.
 int HostChat(void* store,uint8_t type,uint64_t* text,uint32_t senderHandle,uint64_t account,char* answer,size_t capacity) {
     auto cl=client.load();
-    if(type||!text||!text[0]||text[1]>160)return 0;
+    if(type!=kChatType||!text||!text[0]||text[1]>160)return 0;
     std::string_view line(reinterpret_cast<const char*>(text[0]),size_t(text[1]));
     if(cl&&store==at<void*>(cl,0xf8)) {
         if(!line.starts_with("/mts1 "))return 0;
@@ -434,6 +435,7 @@ int HostChat(void* store,uint8_t type,uint64_t* text,uint32_t senderHandle,uint6
         // the full native handle (including generation), never just its slot.
         auto ownHandle=at<uint32_t>(cl,0x466b44);
         if(!ownHandle||senderHandle!=ownHandle||!account)return 2;
+        if(line==kHelloReply){if(!hostAnswered.exchange(true))Log("Map Teleport: host answered; remote teleport enabled");return 2;}
         Status status{};if(ParseStatus(line,status)) {
             std::lock_guard guard(lock);
             for(auto completed:completedRemote)if(completed&&completed==status.nonce)return 2;
@@ -450,6 +452,7 @@ int HostChat(void* store,uint8_t type,uint64_t* text,uint32_t senderHandle,uint6
     }
     // Never relay client-supplied responses as if they originated on the host.
     if(line.starts_with("/mts1 "))return 2;
+    if(line==kHello){memcpy(answer,kHelloReply.data(),kHelloReply.size());answer[kHelloReply.size()]=0;return 1;}
     uint64_t nonce=0;NoticePhase phase=NoticePhase::failed;Status reply{};
     if(line.starts_with("/mtp1 ")||line.starts_with("/mta1 ")) {
         unsigned acknowledgement=0;
@@ -523,8 +526,11 @@ Submission SubmitLocal(uint32_t entity,Destination position) {
     {std::lock_guard guard(lock);if(!hostWorld.storage||GetTickCount64()-hostWorld.seen>2000)return Submission::remote;}
     return Queue(entity,localAccount.load(),{GetTickCount64(),position})?Submission::queued:Submission::rejected;
 }
+bool HostsWorld(){std::lock_guard guard(lock);return hostWorld.storage&&GetTickCount64()-hostWorld.seen<=2000;}
+bool HostAnswered(){return hostAnswered.load();}
 void SetClient(void* c){
     auto previous=client.exchange(c);
+    if(previous!=c)hostAnswered=false;
     if(c){localEntity=(at<uint32_t>(c,0x466b44)&0x3f)+1;if(previous!=c){localAccount=LocalAccount();SafeBounds(at<void*>(c,0x4671d0));std::lock_guard guard(lock);remoteAccount=localAccount;}}
     else{localEntity=0;localAccount=0;std::lock_guard guard(lock);if(predictedStorage&&protection::Disable(predictedStorage,predictedEntity)){predictedStorage=nullptr;predictionAck=0;}remoteStatus={};}
 }

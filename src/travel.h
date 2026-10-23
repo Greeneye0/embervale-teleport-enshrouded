@@ -16,6 +16,10 @@ bool Local(uint32_t entity, Destination position);
 enum class Submission { remote, queued, rejected };
 Submission SubmitLocal(uint32_t entity,Destination position);
 void SetClient(void* client);
+// True while this process runs the world the local player is in (offline or hosting).
+bool HostsWorld();
+// True once the remote host answered kHello on the current client.
+bool HostAnswered();
 bool Prepare();
 void Resume();
 }

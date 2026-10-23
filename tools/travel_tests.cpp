@@ -6,6 +6,7 @@
 #include "../src/direct_signatures.h"
 #include "../src/protection.h"
 #include "../src/history.h"
+#include "../src/protocol.h"
 #include <cassert>
 #include <cstring>
 #include <cstdio>
@@ -148,7 +149,7 @@ int main(int argc,char** argv){
             auto feed=[&](unsigned phase,unsigned countdown=0) {
                 char line[160];sprintf_s(line,"/mts1 %llu %u 2 %u 1 %lld %lld %lld",currentNonce,phase,countdown,ground.x,ground.y,ground.z);
                 uint64_t text[]={reinterpret_cast<uint64_t>(line),strlen(line)},result=0,time=0;
-                appendHook(reinterpret_cast<uint8_t*>(&result),&clientStore,0,text,0,0,0x40,0xDEB5047AE1C664E7ULL,&time);
+                appendHook(reinterpret_cast<uint8_t*>(&result),&clientStore,teleport::kChatType,text,0,0,0x40,0xDEB5047AE1C664E7ULL,&time);
             };
             auto predict=[&](uint64_t elapsed=0){testNow+=elapsed;cursor=0;yieldEntity=true;assert(hooks[0](&predictedContext,playerDesc,sizeof playerDesc));assert(!hooks[1](&predictedContext,playerDesc,sizeof playerDesc));};
             feed(1,3);protection::observed=false;predict();assert(protection::Busy()&&ClientProtectionAck()==0);
@@ -170,7 +171,7 @@ int main(int argc,char** argv){
         Put<uint32_t>(serverData.data(),0x1e0,1);Put<uint32_t>(serverData.data(),0x1f8,1);Put<uint64_t>(serverData.data(),0x228,123);
         receiveHook(serverData.data());
         if(!remote){testAccount=123;Put(clientData.data(),0x4671d0,static_cast<void*>(manager));SetClient(clientData.data());}
-        auto chat=[&](const char* line){uint64_t text[]={reinterpret_cast<uint64_t>(line),strlen(line)},result=0,time=0;appendHook(reinterpret_cast<uint8_t*>(&result),serverData.data(),0,text,0,0,0,123,&time);};
+        auto chat=[&](const char* line){uint64_t text[]={reinterpret_cast<uint64_t>(line),strlen(line)},result=0,time=0;appendHook(reinterpret_cast<uint8_t*>(&result),serverData.data(),teleport::kChatType,text,0,0,0,123,&time);};
         auto tick=[&](uint64_t elapsed=0) {
             testNow+=elapsed;cursor=0;yieldEntity=true;
             auto old=Get<uint32_t>(input,0x17c);auto previousDirect=directCount;
@@ -269,13 +270,21 @@ int main(int argc,char** argv){
     std::vector<uint8_t> server(0x1e0+16*0x148),localClient(0x4671d8);
     Put<uint32_t>(server.data(),0x1e0,1);Put<uint32_t>(server.data(),0x1f8,1);Put<uint64_t>(server.data(),0x228,123);
     receiveHook(server.data());
-    auto chat=[&](void* store,const char* line,uint64_t account){uint64_t text[]={reinterpret_cast<uint64_t>(line),strlen(line)},result=99,time=0;appendHook(reinterpret_cast<uint8_t*>(&result),store,0,text,0,0,account==456?0x80:0x40,account,&time);};
+    auto chat=[&](void* store,const char* line,uint64_t account){uint64_t text[]={reinterpret_cast<uint64_t>(line),strlen(line)},result=99,time=0;appendHook(reinterpret_cast<uint8_t*>(&result),store,teleport::kChatType,text,0,0,account==456?0x80:0x40,account,&time);};
     chat(server.data(),"/mt1 777 858993459200 3865470566400",123);
     assert(appended=="/mts1 777 0 0 0");
     chat(server.data(),"/mtp1 777",123);assert(appended=="/mts1 777 0 0 0");
     chat(server.data(),"/mtp1 777",456);assert(appended=="/mts1 777 9 0 0");
     auto before=appendCount;chat(server.data(),"/mts1 777 8 0 0",123);assert(appendCount==before);
+    // Ordinary player chat (type 0) is never treated as protocol, even with protocol text.
+    {uint64_t text[]={reinterpret_cast<uint64_t>("/mtp1 777"),9},result=99,time=0;appended.clear();
+     appendHook(reinterpret_cast<uint8_t*>(&result),server.data(),0,text,0,0,0x40,123,&time);assert(appended=="/mtp1 777");}
+    // The host answers the one-time hello in place of the hello line itself.
+    chat(server.data(),"/mth1",123);assert(appended==teleport::kHelloReply);
     int clientStore=0;Put<uint32_t>(localClient.data(),0x466b44,0x40);Put(localClient.data(),0xf8,static_cast<void*>(&clientStore));SetClient(localClient.data());
+    assert(!HostAnswered());
+    before=appendCount;chat(&clientStore,"/mts1 0 hello",456);assert(!HostAnswered()&&appendCount==before); // another player's reply
+    chat(&clientStore,"/mts1 0 hello",123);assert(HostAnswered()&&appendCount==before);                   // own reply, consumed
     TrackRemote(777,123);
     chat(&clientStore,"/mts1 777 8 0 0",456);assert(RemoteStatus().phase==NoticePhase::waiting);
     chat(&clientStore,"/mts1 778 8 0 0",123);assert(RemoteStatus().phase==NoticePhase::waiting);
