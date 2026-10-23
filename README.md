@@ -6,6 +6,7 @@ Open the world map, hold **Shift** and hold the **left mouse button** on a spot 
 - Lands on the terrain surface, and waits for unloaded terrain instead of guessing the height.
 - A ring around the cursor fills while you hold. Let go early, press Esc or right-click to cancel.
 - Single player, self-hosted and dedicated servers (the server needs the mod too).
+- Notices in all 15 languages the game supports, following the game's language setting (English, French, Italian, German, Spanish, Japanese, Korean, Polish, Portuguese (Brazil), Russian, Simplified Chinese, Traditional Chinese, Turkish, Ukrainian and Thai). The texts are in `src/strings.h`.
 
 Download and install instructions: see the Nexus Mods page. The player-facing readme is [dist/README.txt](dist/README.txt).
 

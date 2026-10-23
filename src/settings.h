@@ -1,5 +1,6 @@
 #pragma once
 #include "journey.h"
+#include "strings.h"
 #include <windows.h>
 #include <string>
 #include <string_view>
@@ -19,6 +20,13 @@ inline bool ReadShowBanners(const wchar_t* absolutePath) {
     wchar_t value[64]{};
     GetPrivateProfileStringW(L"Messages",L"ShowBanners",L"true",value,64,absolutePath);
     return ParseSwitch(value,true);
+}
+// -1: follow the game's language.
+inline int ReadLanguage(const wchar_t* absolutePath) {
+    wchar_t value[32]{};
+    GetPrivateProfileStringW(L"Messages",L"Language",L"auto",value,32,absolutePath);
+    std::string code;for(auto* c=value;*c;++c)code+=*c<128?char(*c):'?';
+    return text::ParseCode(code);
 }
 inline Settings ReadSettings(const wchar_t* absolutePath) {
     Settings result;

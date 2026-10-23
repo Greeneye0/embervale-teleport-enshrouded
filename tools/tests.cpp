@@ -11,6 +11,8 @@
 #include <limits>
 #include <cstdio>
 #include <vector>
+#include <initializer_list>
+#include <utility>
 namespace {
 int rayCalls=0;uint8_t complete=1,hitFlag=1;float ground=123.25f;
 void* FakeRay(void* output,void*,const float* from,const float* to,const uint8_t* options) {
@@ -74,6 +76,45 @@ int main() {
      assert(joined==text);
  }
  assert(popup::Wrap("",0).empty());assert(popup::Wrap("abcdefgh",3).size()==3);
+ // Every language: all texts present, one %u in the countdown, and lines that fit and keep
+ // every letter (CJK and Thai lines break without spaces).
+ for(size_t lang=0;lang<size_t(text::Lang::count);++lang) {
+     for(int id=0;id<text::IdCount;++id) {
+         std::string_view value=text::Get(text::Lang(lang),text::Id(id));assert(!value.empty());
+         auto percent=value.find('%');
+         if(id==text::Countdown)assert(percent!=value.npos&&value.substr(percent,2)=="%u"&&value.find('%',percent+1)==value.npos);
+         else assert(percent==value.npos);
+         std::string flat,joined;for(char ch:value)if(ch!=' ')flat+=ch;
+         for(const auto& line:popup::Wrap(value)) {
+             size_t columns=0,n=0;
+             for(size_t i=0;i<line.size();i+=n)columns+=popup::Columns(popup::Decode(line,i,n));
+             assert(columns<=56&&!line.empty()&&line.front()!=' ');
+             auto first=popup::Decode(line,0,n);assert(!popup::Closing(first)&&popup::Columns(first)!=0);
+             for(char ch:line)if(ch!=' ')joined+=ch;
+         }
+         assert(joined==flat);
+     }
+ }
+ for(unsigned s=0;s<3;++s) {
+     assert(scenarios[s].opening==text::ScenarioLine(text::Lang::en,s,0));
+     assert(scenarios[s].problem==text::ScenarioLine(text::Lang::en,s,1));
+     assert(scenarios[s].correction==text::ScenarioLine(text::Lang::en,s,2));
+ }
+ assert(popup::Codepoints("Ä傳ต")==3);
+ // The game's word for "Legendary" tells the language.
+ for(auto [word,lang]:std::initializer_list<std::pair<const char*,text::Lang>>{
+         {"Legendary",text::Lang::en},{"Légendaire",text::Lang::fr},{"Leggendario",text::Lang::it},
+         {"Legendär",text::Lang::de},{"Legendario",text::Lang::es},{"レジェンダリー",text::Lang::ja},
+         {"전설",text::Lang::ko},{"Legendarny",text::Lang::pl},{"Lendário",text::Lang::pt},
+         {"Легендарный",text::Lang::ru},{"传说",text::Lang::zhHans},{"傳說",text::Lang::zhHant},
+         {"Efsanevi",text::Lang::tr},{"Легендарний",text::Lang::uk},{"ตำนาน",text::Lang::th}}) {
+     text::Lang found=text::Lang::count;assert(text::Detect(word,found)&&found==lang);
+ }
+ {text::Lang kept=text::Lang::de;assert(!text::Detect("",kept)&&!text::Detect("???",kept)&&kept==text::Lang::de);}
+ assert(text::ParseCode("auto")==-1&&text::ParseCode("")==-1&&text::ParseCode("xx")==-1);
+ assert(text::ParseCode(" DE ")==int(text::Lang::de)&&text::ParseCode("zh-TW")==int(text::Lang::zhHant));
+ assert(text::ParseCode("zh-hans")==int(text::Lang::zhHans)&&text::ParseCode("pt-BR")==int(text::Lang::pt));
+ assert(text::ParseCode("th")==int(text::Lang::th));
  // First-use policy is independent of the optional regular deluxe mode.
  assert(SelectMode({false,true},false)==TravelMode::prank);
  assert(SelectMode({true,true},false)==TravelMode::prank);

@@ -1,4 +1,4 @@
-EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.0.0
+EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.0
 ==========================================================================
 
 Open the world map, hold Shift and hold the left mouse button on any spot for one second.
@@ -34,7 +34,7 @@ The mod has to be on the server AND on the game of every player who wants to tel
        greeneye\map-teleport\...
 4. Start the server.
 5. Check it loaded: greeneye\loader.log in the server folder should contain
-   "Embervale Teleport 1.0.0: server companion loaded".
+   "Embervale Teleport 1.1.0: server companion loaded".
 Players: each player installs the mod on their own game as above. Players without the mod
 can still join and play; they just can't teleport, and see nothing from the mod.
 Settings: the server's own map-teleport.ini decides how teleports behave for everyone on
@@ -53,7 +53,10 @@ USE
   the spot you first clicked.
 - If the land at the destination isn't loaded yet, the mod waits for it, so you never
   land inside a hill or in the air.
-- Short notices ("Teleporting in 3...") tell you what is happening.
+- Short notices ("Teleporting in 3...") tell you what is happening, in the game's language:
+  English, French, Italian, German, Spanish, Japanese, Korean, Polish,
+  Portuguese (Brazil), Russian, Simplified and Traditional Chinese, Turkish, Ukrainian
+  and Thai. Change the game's language and the notices follow.
 
 
 SETTINGS
@@ -62,6 +65,7 @@ greeneye\map-teleport\map-teleport.ini. Every setting is explained in the file i
 Restart the game (or the server) after changing it. For example:
     [Teleport] DeluxeTeleports = false   true: arrive high above the spot and glide down
     [Messages] ShowBanners = True        False: hide the mod's notices
+    [Messages] Language = auto           or en, de, fr, ja, zh-hans...: the notices' language
 
 
 UNINSTALL
@@ -91,5 +95,9 @@ GOOD TO KNOW
 
 CHANGES
 -------
+1.1.0
+- Notices in all 15 languages Enshrouded supports, following the game's language.
+- [Messages] Language in the ini picks one language instead.
+
 1.0.0
 - First release.

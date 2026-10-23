@@ -125,24 +125,22 @@ void EndFrame(void* app) {
     teleport::travel::SetClient(client);
     Cancel(); // one dispatch per click, including across subsequent frames
     uint32_t entity=(at<uint32_t>(client,0x466b44)&0x3f)+1;
-    if(watching.nonce){teleport::popup::Show("Embervale Teleport Services","A teleport is already in progress.",2000);return;}
+    if(watching.nonce){teleport::popup::Show(teleport::popup::Say(teleport::text::Title),teleport::popup::Say(teleport::text::InProgress),2000);return;}
     uint64_t now=GetTickCount64();
     watching={client,at<void*>(client,0x47d4e0),0,now+500,now+35000,entity};
     auto submitted=teleport::travel::SubmitLocal(entity,target);
     if(submitted==teleport::travel::Submission::queued)watching.nonce=teleport::travel::Latest(entity).nonce;
     else if(submitted==teleport::travel::Submission::rejected) {
-        watching={};teleport::popup::Show("Embervale Teleport Services","The host is busy or teleporting is unavailable. Please try again shortly.",4000);return;
+        watching={};teleport::popup::Show(teleport::popup::Say(teleport::text::Title),teleport::popup::Say(teleport::text::HostBusy),4000);return;
     } else {
         auto hostMod=CheckHost(client,at<void*>(client,0x47d4e0));
         if(hostMod!=HostMod::present){
             watching={};
-            teleport::popup::Show("Embervale Teleport Services",hostMod==HostMod::checking?
-                "Still checking whether this server runs Embervale Teleport. Please try again in a few seconds.":
-                "This server does not run Embervale Teleport, so map teleport is unavailable here. The server needs the mod installed too.",6000);
+            teleport::popup::Show(teleport::popup::Say(teleport::text::Title),teleport::popup::Say(hostMod==HostMod::checking?teleport::text::StillChecking:teleport::text::ServerMissing),6000);
             return;
         }
         auto account=teleport::LocalAccount();
-        if(!account){watching={};teleport::popup::Show("Embervale Teleport Services","Could not identify this player's account. Teleport cancelled.",5000);return;}
+        if(!account){watching={};teleport::popup::Show(teleport::popup::Say(teleport::text::Title),teleport::popup::Say(teleport::text::NoAccount),5000);return;}
         static uint64_t lastNonce=0;lastNonce=now>lastNonce?now:lastNonce+1;
         watching.nonce=lastNonce;watching.remote=true;
         teleport::travel::TrackRemote(watching.nonce,account);
@@ -191,24 +189,22 @@ void StatusFrame(void* app) {
     watching.prank=watching.prank||status.protection;
     if(status.phase!=watching.shown||status.countdown!=watching.countdown)watching.deadline=now+35000;
     if(!Finished(status)&&now>=watching.deadline) {
-        popup::Show("Embervale Teleport Services",status.phase==NoticePhase::waiting?
-            "Teleport preparation is taking longer than expected. Your request is still pending.":
-            "The host has not confirmed arrival. Please wait before trying another teleport.",6000);
+        popup::Show(popup::Say(text::Title),popup::Say(status.phase==NoticePhase::waiting?text::SlowPreparing:text::NoArrival),6000);
         if(status.protection){watching.deadline=now+35000;return;}
         watching={};travel::TrackRemote(0,LocalAccount());return;
     }
     if(status.phase!=watching.shown||status.countdown!=watching.countdown) {
         watching.shown=status.phase;watching.countdown=status.countdown;
-        std::string_view message;char countdownText[48]{};
+        std::string_view message;char countdownText[96]{};
         switch(status.phase) {
-            case NoticePhase::waiting:message="Preparing your teleport...";break;
-            case NoticePhase::countdown:sprintf_s(countdownText,"Teleporting in %u...",status.countdown);message=countdownText;break;
-            case NoticePhase::scenic:message=scenarios[status.scenario].opening;break;
-            case NoticePhase::problem:message=scenarios[status.scenario].problem;break;
-            case NoticePhase::correction:message=scenarios[status.scenario].correction;break;
+            case NoticePhase::waiting:message=popup::Say(text::Preparing);break;
+            case NoticePhase::countdown:sprintf_s(countdownText,popup::Say(text::Countdown),status.countdown);message=countdownText;break;
+            case NoticePhase::scenic:message=text::ScenarioLine(popup::Language(),status.scenario,0);break;
+            case NoticePhase::problem:message=text::ScenarioLine(popup::Language(),status.scenario,1);break;
+            case NoticePhase::correction:message=text::ScenarioLine(popup::Language(),status.scenario,2);break;
             case NoticePhase::returning:break; // Keep the preceding text; do not restart its typewriter.
-            case NoticePhase::complete:message=watching.prank?"We assure you this service error will not happen again. Thank you for choosing Embervale Teleport Services.":"Thank you for choosing Embervale Teleport Services.";break;
-            case NoticePhase::failed:message="Teleport could not be completed. Check the host's Map Teleport log.";break;
+            case NoticePhase::complete:message=popup::Say(watching.prank?text::PrankThankYou:text::ThankYou);break;
+            case NoticePhase::failed:message=popup::Say(text::Failed);break;
             case NoticePhase::ascending:popup::Clear();break;
             default:break;
         }
@@ -217,7 +213,7 @@ void StatusFrame(void* app) {
         else if(status.phase==NoticePhase::problem)displayMs=problemMs;
         else if(status.phase==NoticePhase::scenic)displayMs=scenicMs;
         else if(status.phase==NoticePhase::correction)displayMs=correctionMs;
-        if(!message.empty())popup::Show("Embervale Teleport Services",std::string(message),displayMs,status.phase!=NoticePhase::countdown);
+        if(!message.empty())popup::Show(popup::Say(text::Title),std::string(message),displayMs,status.phase!=NoticePhase::countdown);
     }
     if(Finished(status)){watching={};travel::TrackRemote(0,LocalAccount());}
 }
@@ -248,7 +244,7 @@ GREENEYE_MOD_START {
     if(!greeneye::ClaimProcess(L"MapTeleport",host)) return false;
     if(!teleport::protection::Init(host)){Log("Map Teleport: protection bindings unavailable; disabled");return false;}
     if(!teleport::travel::Init(host)) {Log("Map Teleport: host bindings unavailable; disabled");return false;}
-    if(serverSide) {Log("Embervale Teleport 1.0.0: server companion loaded");return true;}
+    if(serverSide) {Log("Embervale Teleport 1.1.0: server companion loaded");return true;}
     auto mapTail=host->find("48 8D AC 24 A0 F8 FF FF 48 81 EC 60 08 00 00 48 8B 05",nullptr);
     auto loop=host->find("40 53 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 48 8D 81 58 4F 03 00",nullptr);
     auto send=host->find("4C 8B DC 55 56 57 49 8D AB 18 FF FF FF",nullptr);
@@ -264,7 +260,7 @@ GREENEYE_MOD_START {
     nextLoop=reinterpret_cast<LoopFn>(host->hook(loop,reinterpret_cast<void*>(LoopHook),13,nullptr,0));
     nextPlay=reinterpret_cast<LoopFn>(host->hook(play,reinterpret_cast<void*>(PlayHook),18,nullptr,0));
     if(!nextMap||!nextLoop||!nextPlay) {paused=true;Log("Map Teleport: hook installation failed");return false;}
-    Log("Embervale Teleport 1.0.0: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
+    Log("Embervale Teleport 1.1.0: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
 }
 GREENEYE_MOD_HOT {static const GreeneyeHot api{sizeof(GreeneyeHot),Prepare,Ready,Resume};return &api;}
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {if(reason==DLL_PROCESS_ATTACH) DisableThreadLibraryCalls(instance);return TRUE;}

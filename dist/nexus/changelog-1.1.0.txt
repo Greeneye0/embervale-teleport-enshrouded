@@ -1,0 +1,3 @@
+1.1.0
+- Notices in all 15 languages Enshrouded supports, following the game's language.
+- [Messages] Language in the ini picks one language instead.

@@ -3,6 +3,8 @@
 #include "popup.h"
 #include "settings.h"
 #include <mutex>
+#include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <algorithm>
 #include <cmath>
@@ -17,6 +19,11 @@ using Layer=void*(*)(void*,const Text*,uint8_t,uint32_t,int32_t,uint32_t);
 using Named=void*(*)(void*,const Text*);using Opaque=void*(*)(void*);
 using Label=void(*)(uint8_t*,const Text*,const uint8_t*,uint8_t);
 using DrawImage=void(*)(void*,const float*,const uint32_t*,const uint64_t*);
+using LocaText=Text*(*)(Text*,uint32_t);LocaText loca{};
+// FbUiLocaLinks (assets + 0x10) -> rpgTerms (+0x40) -> rarityLegendary (+0x1dd0): a 16-byte key.
+constexpr size_t kLocaLegendary=0x10+0x40+0x1dd0;
+std::atomic<int> forced{-1},detected{-1}; // -1: not known yet (English)
+uint64_t nextDetect=0;
 Begin begin{};End end{},endLayer{},endLabel{};Size size{};Layer layer{};Named named{};Opaque opaque{};Label label{};DrawImage draw{};
 void** root=nullptr;
 std::mutex mutex;std::string heading,body;uint64_t until=0,started=0,revealMs=0;bool ready=false,showBanners=true;
@@ -41,10 +48,27 @@ void Line(const std::string& value,void* assets,uint32_t color,uint64_t visible=
     at<uint64_t>(buffer,0xa0)=visible;
     endLabel(buffer);
 }
+void Log(const char* s){if(auto* host=greeneye::Host())host->log(s);}
+uint32_t Fnv1a32(const uint8_t* p,size_t n){uint32_t h=0x811c9dc5u;for(size_t i=0;i<n;++i)h=(h^p[i])*0x1000193u;return h;}
+// The game's language can change while it runs; look at its word for "Legendary" once a second.
+void DetectLanguage(void* assets) {
+    auto now=GetTickCount64();
+    if(!loca||!assets||now<nextDetect)return;
+    nextDetect=now+1000;
+    Text result=MakeText("");loca(&result,Fnv1a32(static_cast<uint8_t*>(assets)+kLocaLegendary,16));
+    if(!result.bytes||!result.length)return;
+    std::string word(result.bytes,(std::min)(result.length,size_t(64)));text::Lang lang;
+    if(!text::Detect(word,lang)||int(lang)==detected.load())return;
+    detected=int(lang);
+    char line[160];sprintf_s(line,"Map Teleport: notices in %s (the game's \"Legendary\": %s)",text::kCodes[size_t(lang)],word.c_str());Log(line);
+}
 template<class T>bool Bind(const GreeneyeHost* host,T& out,const char* pattern){out=reinterpret_cast<T>(host->find(pattern,nullptr));return out!=nullptr;}
 }
 bool Init(const GreeneyeHost* host,void** uiRoot) {
-    if(host->modDir)showBanners=ReadShowBanners((std::wstring(host->modDir)+L"\\map-teleport.ini").c_str());
+    if(host->modDir){
+        auto ini=std::wstring(host->modDir)+L"\\map-teleport.ini";
+        showBanners=ReadShowBanners(ini.c_str());forced=ReadLanguage(ini.c_str());
+    }
     root=uiRoot;bool ok=true;
     ok&=Bind(host,begin,"40 53 48 83 EC 20 48 8B 05 ?? ?? ?? ?? 48 8B D9 45 33 C0");
     ok&=Bind(host,end,"48 89 5C 24 18 48 89 74 24 20 57 48 83 EC 60 80 79 20 00");
@@ -56,18 +80,23 @@ bool Init(const GreeneyeHost* host,void** uiRoot) {
     ok&=Bind(host,label,"48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 41 56 48 83 EC 50 48 8B DA 41 0F B6 F9");
     ok&=Bind(host,endLabel,"40 55 56 57 48 8D 6C 24 B9 48 81 EC F0 00 00 00 0F 29 BC 24 B0 00 00 00");
     ok&=Bind(host,draw,"4D 8B 09 45 8B 00 E9 ?? ?? ?? ?? CC");
+    // Optional: without it the notices stay in English (or the ini's language).
+    if(!Bind(host,loca,"48 89 5C 24 10 48 89 74 24 18 55 57 41 55 41 56 41 57 48 8D AC 24 F0 F8 FF FF"))
+        Log("Map Teleport: game text lookup not found; notices use English or [Messages] Language");
     ready=ok;return ok;
 }
+text::Lang Language(){int f=forced.load();if(f<0)f=detected.load();return text::Lang(f>=0?f:0);}
 void Show(std::string title,std::string message,uint64_t durationMs,bool typewriter){
     if(!showBanners)return;
     std::lock_guard guard(mutex);heading=std::move(title);body=std::move(message);
     started=GetTickCount64();until=started+(std::min)(durationMs,60000ULL);
-    revealMs=typewriter?(std::min)(uint64_t(body.size())*16,durationMs/2):0;
+    revealMs=typewriter?(std::min)(uint64_t(Codepoints(body))*16,durationMs/2):0;
 }
 void Clear(){std::lock_guard guard(mutex);until=0;heading.clear();body.clear();}
 bool Visible(){std::lock_guard guard(mutex);return ready&&GetTickCount64()<until;}
 void DrawRing(float x,float y,float progress) {
     if(!ready)return;
+    if(root&&*root)DetectLanguage(at<void*>(*root,200));
     auto name=MakeText("embervaleTeleportCursor");alignas(16) uint8_t frame[0x400]{};
     layer(frame,&name,1,0x16,-1,0);
     Widget parent;named(parent.raw,&name);opaque(parent.raw);
@@ -79,10 +108,12 @@ void DrawRing(float x,float y,float progress) {
     end(parent.raw);endLayer(frame);
 }
 void Draw() {
-    if(!showBanners||!ready||!root||!*root)return;
-    std::string title,message;size_t revealed=0;
+    if(!ready||!root||!*root)return;
+    DetectLanguage(at<void*>(*root,200));
+    if(!showBanners)return;
+    std::string title,message;size_t revealed=0; // in code points
     {std::lock_guard guard(mutex);auto now=GetTickCount64();if(now>=until)return;title=heading;message=body;
-        revealed=revealMs?(std::min)(message.size(),size_t((now-started)*message.size()/revealMs)):message.size();}
+        auto total=Codepoints(message);revealed=revealMs?(std::min)(total,size_t((now-started)*total/revealMs)):total;}
     auto assets=at<void*>(*root,200);if(!assets)return;
     auto name=MakeText("embervaleTeleportNotice");alignas(16) uint8_t frame[0x400]{};
     layer(frame,&name,1,0x16,-1,0);
@@ -96,10 +127,12 @@ void Draw() {
         {Box row(left+24,110,width-48,36);Line(title,assets,0xff68cce8);}
         // Wrap the complete message first, keeping the window and words in
         // place while the body prints one character at a time.
-        size_t offset=0;
+        size_t offset=0,before=0,counted=0; // bytes; code points before offset; bytes counted
         for(size_t i=0;i<lines.size();++i){
             offset=message.find(lines[i],offset);if(offset==std::string::npos)break;
-            auto count=revealed>offset?(std::min)(lines[i].size(),revealed-offset):0;
+            before+=Codepoints(std::string_view(message).substr(counted,offset-counted));counted=offset;
+            auto length=Codepoints(lines[i]);
+            auto count=revealed>before?(std::min)(length,revealed-before):0;
             {Box row(left+24,156+float(i)*30,width-48,30);Line(lines[i],assets,0xffffffff,count);}
             offset+=lines[i].size();
         }
