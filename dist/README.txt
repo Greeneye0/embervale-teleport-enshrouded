@@ -19,8 +19,28 @@ INSTALL
        greeneye\map-teleport\mod.json
 4. Start the game, open the map, hold Shift and hold the left mouse button on a spot.
 
-Dedicated server: copy the same files next to enshrouded_server.exe in the server folder
-and restart the server. Every player who wants to teleport needs the mod on their game.
+Single player and hosting your own game: that's all. Your game is the host.
+
+
+DEDICATED SERVER
+----------------
+The mod has to be on the server AND on the game of every player who wants to teleport.
+1. Stop the server.
+2. Open the server folder, the one with enshrouded_server.exe. In Steam: Library > Tools >
+   Enshrouded Dedicated Server > right-click > Manage > Browse local files. With SteamCMD
+   it's the folder you installed to; with a rented server, use the host's file manager/FTP.
+3. Copy everything from this zip into that folder, the same way as for the game:
+       dbgcore.dll                              next to enshrouded_server.exe
+       greeneye\map-teleport\...
+4. Start the server.
+5. Check it loaded: greeneye\loader.log in the server folder should contain
+   "Embervale Teleport 1.0.0: server companion loaded".
+Players: each player installs the mod on their own game as above. Players without the mod
+can still join and play; they just can't teleport, and see nothing from the mod.
+Settings: the server's own map-teleport.ini decides how teleports behave for everyone on
+that server; each player's own ini only decides whether their notices are shown.
+Rented servers: the host must let you add files next to enshrouded_server.exe. Tested on
+a Windows server; not tested on Linux/Wine hosting.
 
 Install it by hand: Vortex does not know the Greeneye Loader yet.
 
