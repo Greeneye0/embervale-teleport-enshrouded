@@ -1,0 +1,170 @@
+#include "../src/countdown.h"
+#include "../src/protocol.h"
+#include "../src/terrain.h"
+#include "../src/settings.h"
+#include "../src/history.h"
+#include "../src/altitude.h"
+#include "../src/arrival.h"
+#include "../src/popup.h"
+#include "../src/status.h"
+#include <cassert>
+#include <limits>
+#include <cstdio>
+#include <vector>
+namespace {
+int rayCalls=0;uint8_t complete=1,hitFlag=1;float ground=123.25f;
+void* FakeRay(void* output,void*,const float* from,const float* to,const uint8_t* options) {
+    ++rayCalls;assert(from[1]==256.25f&&to[1]==0&&from[0]==200&&from[2]==900);
+    assert(options[2]==1&&options[3]==1);
+    auto p=static_cast<uint8_t*>(output);p[0x12]=complete;p[0x13]=hitFlag;
+    memcpy(p+4,&ground,4);return p;
+}
+template<class T> void Put(void* p,size_t at,T value){memcpy(static_cast<uint8_t*>(p)+at,&value,sizeof value);}
+}
+int main() {
+ using namespace teleport;
+ uint64_t poll=0;assert(ParsePoll("/mtp1 123",poll)&&poll==123);
+ for(auto invalid:{"/mtp1 0","/mtp1 -1","/mtp1 123 extra","/mtp1  123","/mtp1 18446744073709551616"})assert(!ParsePoll(invalid,poll));
+ Status status{};assert(ParseStatus("/mts1 123 1 2 3",status));
+ assert(status.phase==NoticePhase::countdown&&status.scenario==2&&status.countdown==3);
+ assert(MatchesStatus(status,123,456,456)&&!MatchesStatus(status,124,456,456)&&!MatchesStatus(status,123,789,456)&&!MatchesStatus(status,123,0,0));
+ for(auto invalid:{"/mts1 0 0 0 0","/mts1 123 10 0 0","/mts1 123 3 3 0","/mts1 123 1 0 0","/mts1 123 0 0 1","/mts1 123 1 0 4","/mts1 123 8 0 0 extra"})assert(!ParseStatus(invalid,status));
+ assert(ParseStatus("/mts1 123 8 0 0",status)&&Finished(status));
+ Destination p{};
+ assert(Convert(500,300,100,100,2,1000,1000,p));
+ assert(p.x==int64_t(200)*4294967296LL&&p.z==int64_t(900)*4294967296LL&&p.y==0);
+ Destination q{};
+ assert(Convert(140,70,-60,-30,1,1000,1000,q));
+ assert(q.x==p.x&&q.z==p.z); // same point after zoom/pan
+ assert(!Convert(-1,0,0,0,1,1000,1000,q));
+ assert(!Convert(0,0,0,0,0,1000,1000,q));
+ assert(!Convert(0,0,0,0,std::numeric_limits<float>::quiet_NaN(),1000,1000,q));
+ assert(!Convert(0,0,0,0,1,INFINITY,1000,q));
+ Countdown c;assert(!c.due(10000));c.start(500,p);
+ assert(!c.due(1499)&&c.due(1500)&&c.due(1600));
+ assert(c.progress(1000)==0.5f&&c.progress(1800)==1);
+ assert(c.target.x==p.x);c.cancel();assert(!c.due(2000));
+ c.start(3000,q);assert(!c.due(3999)&&c.due(4000));
+ Request request;
+ assert(ParseRequest("/mt1 123 858993459200 3865470566400",request));
+ assert(request.nonce==123&&request.position.x==p.x&&request.position.z==p.z);
+ for(auto bad:{"/mt1 0 1 2","/mt1 1 -1 2","/mt1 1 1 -2","/mt1 1 1 2 garbage","/mt1 1 1 2\n","/mt1 1  1 2","/mt1 1 999999999999999999999999 2","/mt1 1 429496729600001 2"})
+     assert(!ParseRequest(bad,request));
+ std::vector<uint8_t> terrain(0x1c08),realm(0x3870),grid(0x180);
+ Put(terrain.data(),0x1bf8,realm.data());Put<uint64_t>(terrain.data(),0x1c00,1);
+ Put(realm.data(),0,grid.data());Put<uint32_t>(grid.data(),0x10,3);
+ Put<uint32_t>(grid.data(),0x14,128);Put<uint32_t>(grid.data(),0x18,32);
+ auto dest=p;
+ assert(TopSurface(FakeRay,terrain.data(),0,dest)==Surface::ready);
+ assert(dest.y==int64_t(123.25*4294967296.0));
+ complete=0;assert(TopSurface(FakeRay,terrain.data(),0,dest)==Surface::loading);
+ complete=1;hitFlag=0;assert(TopSurface(FakeRay,terrain.data(),0,dest)==Surface::invalid);
+ hitFlag=1;ground=INFINITY;assert(TopSurface(FakeRay,terrain.data(),0,dest)==Surface::invalid);
+ int before=rayCalls;
+ assert(TopSurface(FakeRay,terrain.data(),1,dest)==Surface::invalid);
+ dest.x=1024LL*4294967296LL;assert(TopSurface(FakeRay,terrain.data(),0,dest)==Surface::invalid);
+ assert(rayCalls==before);
+ assert(ArrivedAt(p,p));auto moved=p;moved.y+=4294967296LL;
+ assert(!ArrivedAt(moved,p));moved=p;moved.x+=4294967;assert(ArrivedAt(moved,p));
+ assert(!ArrivedAt({INT64_MIN,0,0},{INT64_MAX,0,0}));
+ for(const auto& scenario:scenarios)for(auto text:{scenario.opening,scenario.problem,scenario.correction}) {
+     auto lines=popup::Wrap(text);assert(!lines.empty()&&lines.size()<=8);
+     std::string joined;
+     for(const auto& line:lines){assert(line.size()<=72);if(!joined.empty())joined+=' ';joined+=line;}
+     assert(joined==text);
+ }
+ assert(popup::Wrap("",0).empty());assert(popup::Wrap("abcdefgh",3).size()==3);
+ // First-use policy is independent of the optional regular deluxe mode.
+ assert(SelectMode({false,true},false)==TravelMode::prank);
+ assert(SelectMode({true,true},false)==TravelMode::prank);
+ assert(SelectMode({true,true},true)==TravelMode::deluxe);
+ assert(SelectMode({false,true},true)==TravelMode::normal);
+ assert(SelectMode({true,false},false)==TravelMode::deluxe);
+ assert(SelectMode({false,false},false)==TravelMode::normal);
+ Destination high=p;high.y=2000LL*4294967296LL;
+ for(unsigned scenario=0;scenario<3;++scenario) {
+     Journey journey;
+     assert(!journey.begin(TravelMode::prank,scenario,100,p,high,false));
+     assert(journey.begin(TravelMode::prank,scenario,100,p,high,true));
+     assert(!journey.begin(TravelMode::normal,0,100,p,high,false));
+     assert(journey.countdown(99)==3&&journey.countdown(1099)==3);
+     assert(journey.countdown(1100)==2&&journey.countdown(2100)==1);
+     journey.tick(3099);assert(!journey.needsTravel());
+     journey.tick(3100);assert(journey.needsTravel()&&journey.destination().y==high.y);
+     journey.tick(100000);assert(journey.phase==Phase::ascending); // time cannot fake arrival
+     journey.arrived(100000);assert(journey.message()==scenarios[scenario].opening);
+     journey.tick(114999);assert(journey.phase==Phase::scenic);
+     journey.tick(115000);assert(journey.message()==scenarios[scenario].problem);
+     journey.tick(120000);assert(journey.message()==scenarios[scenario].correction);
+     journey.tick(132000);assert(journey.needsTravel()&&journey.destination().y==p.y);
+     assert(!journey.rememberFirstUse()&&journey.protectedFall);
+     journey.restored();assert(journey.protectedFall); // premature acknowledgment ignored
+     journey.arrived(133000);assert(journey.phase==Phase::restoring);
+     assert(!journey.rememberFirstUse());journey.restored();
+     assert(journey.rememberFirstUse()&&!journey.protectedFall);
+ }
+ for(auto phase:{Phase::countdown,Phase::ascending,Phase::scenic,Phase::problem,Phase::correction,Phase::returning,Phase::restoring}) {
+     Journey journey;assert(journey.begin(TravelMode::prank,0,0,p,high,true));
+     journey.phase=phase;journey.recover();
+     assert(journey.protectedFall&&!journey.rememberFirstUse());
+     if(phase!=Phase::restoring) {
+         assert(journey.phase==Phase::returning&&journey.destination().y==p.y);
+         journey.arrived(1);
+     }
+     journey.restored();assert(journey.rememberFirstUse());
+ }
+ for(auto mode:{TravelMode::normal,TravelMode::deluxe}) {
+     Journey journey;assert(journey.begin(mode,0,0,p,high,false));
+     assert(!journey.protectedFall&&journey.message().empty());
+     assert(journey.destination().y==(mode==TravelMode::normal?p.y:high.y));
+     journey.recover();assert(journey.phase==Phase::ascending);
+     journey.arrived(100);journey.tick(100000);
+     assert(journey.phase==Phase::complete&&!journey.rememberFirstUse());
+ }
+ assert(ParseSwitch(L" TRUE ",false)&&!ParseSwitch(L"Off",true));
+ assert(!ParseSwitch(L"garbage",false)&&ParseSwitch(L"garbage",true));
+ wchar_t temp[MAX_PATH],filename[MAX_PATH];assert(GetTempPathW(MAX_PATH,temp));
+ assert(GetTempFileNameW(temp,L"mtp",0,filename));
+ assert(DeleteFileW(filename));
+ std::vector<uint8_t> boundsManager(0xc0),boxes(0x38);
+ WorldBounds worldBounds{{0,0,0},{10240LL*4294967296LL,2560LL*4294967296LL,10240LL*4294967296LL}};
+ memcpy(boxes.data(),&worldBounds.minimum,24);memcpy(boxes.data()+24,&worldBounds.maximum,24);
+ Put(boundsManager.data(),0xb0,boxes.data());Put<uint64_t>(boundsManager.data(),0xb8,1);
+ WorldBounds readBounds;assert(ReadWorldBounds(boundsManager.data(),readBounds));
+ Destination aerial;assert(HighDestination(readBounds,p,aerial));
+ assert(aerial.x==p.x&&aerial.z==p.z&&aerial.y==2556LL*4294967296LL);
+ auto outside=p;outside.x=readBounds.maximum.x;assert(!HighDestination(readBounds,outside,aerial));
+ outside=p;outside.y=2550LL*4294967296LL;assert(!HighDestination(readBounds,outside,aerial));
+ Put<uint64_t>(boundsManager.data(),0xb8,0);assert(!ReadWorldBounds(boundsManager.data(),readBounds));
+ std::wstring ini=std::wstring(filename)+L".ini";
+ assert(WritePrivateProfileStringW(L"Teleport",L"DeluxeTeleports",L"true",ini.c_str()));
+ assert(WritePrivateProfileStringW(L"Prank",L"NoFun",L"true",ini.c_str()));
+ auto settings=ReadSettings(ini.c_str());assert(settings.deluxe&&!settings.prank);
+ assert(WritePrivateProfileStringW(L"Prank",L"NoFun",L"false",ini.c_str()));assert(ReadSettings(ini.c_str()).prank);
+ assert(WritePrivateProfileStringW(L"Prank",L"NoFun",nullptr,ini.c_str()));assert(ReadSettings(ini.c_str()).prank);
+ assert(ReadShowBanners(ini.c_str()));
+ assert(WritePrivateProfileStringW(L"Messages",L"ShowBanners",L"false",ini.c_str()));assert(!ReadShowBanners(ini.c_str()));
+ assert(WritePrivateProfileStringW(L"Messages",L"ShowBanners",L"true",ini.c_str()));assert(ReadShowBanners(ini.c_str()));
+ assert(DeleteFileW(ini.c_str()));
+ History history;assert(history.open(filename));
+ assert(!history.begin(0,p));assert(history.begin(123,p));assert(!history.begin(123,high));
+ History restarted;assert(restarted.open(filename));
+ assert(restarted.find(123)&&!restarted.find(123)->complete);
+ assert(restarted.find(123)->ground.x==p.x&&restarted.find(123)->ground.z==p.z);
+ assert(!restarted.find(456));assert(!restarted.finish(456));
+ assert(restarted.finish(123));
+ History finished;assert(finished.open(filename)&&finished.find(123)->complete);
+ assert(!finished.begin(123,p));assert(finished.begin(456,p));
+ // Corrupt history must not silently become an empty first-use ledger.
+ HANDLE corrupt=CreateFileW(filename,GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+ assert(corrupt!=INVALID_HANDLE_VALUE);DWORD written;
+ const char invalid[]="MapTeleportHistory 1\n123 pending 0 0 0\n123 done 0 0 0\n";
+ assert(WriteFile(corrupt,invalid,sizeof(invalid)-1,&written,nullptr));CloseHandle(corrupt);
+ History damaged;assert(!damaged.open(filename)&&!damaged.ready()&&!damaged.begin(789,p));
+ assert(DeleteFileW(filename));
+ puts("PASS: map zoom/pan conversion, bounds, nonfinite data, one-second timing and cancellation");
+ puts("PASS: request bounds/malformed input, native terrain completeness, surface height, missing/outside terrain");
+ puts("PASS: all three prank scripts, protection/arrival acknowledgments, recovery at every phase, independent deluxe policy");
+ puts("PASS: INI switches, persistent per-account history, interrupted/completed visits, corrupt history rejection");
+ puts("PASS: scene-bound altitude selection, boundary rejection and insufficient headroom (native enforcement unverified)");
+}

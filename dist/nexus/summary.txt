@@ -1,0 +1,1 @@
+Shift + hold left mouse on the world map and teleport there: the game's own teleport animation, a safe landing on the ground, waits for unloaded terrain. Works in single player, hosted games and on dedicated servers.

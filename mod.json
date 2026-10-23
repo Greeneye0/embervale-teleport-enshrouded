@@ -1,0 +1,10 @@
+{
+  "id": "map-teleport",
+  "name": "Embervale Teleport",
+  "version": "1.0.0",
+  "dll": "map-teleport.dll",
+  "side": "both",
+  "api": 2,
+  "description": "Map based teleport: Shift + hold left mouse on the world map for one second to travel there.",
+  "author": "GreeneyeDS"
+}

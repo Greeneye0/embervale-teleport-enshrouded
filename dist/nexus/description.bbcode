@@ -1,0 +1,80 @@
+[center][size=6][b]EMBERVALE TELEPORT[/b][/size]
+[size=4][color=#e8c882]M A P   B A S E D   T E L E P O R T[/color][/size]
+
+[size=3]Point at the map. Hold. You're there.[/size][/center]
+
+[center][img]{IMG_BANNER}[/img][/center]
+
+[line]
+
+[size=4][b]What it does[/b][/size]
+
+Open the world map, hold [b]Shift[/b] and hold the [b]left mouse button[/b] on any spot for one second. The map closes and you travel there.
+[list]
+[*][b]The game's own teleport[/b]: the native travel animation and effect, not a jerky position hack.
+[*][b]Lands you on the ground[/b] at the spot you picked, not inside a hill or high in the air.
+[*][b]Waits for unloaded terrain[/b]: far-away land is loaded first, so the height is never guessed.
+[*][b]Hard to trigger by accident[/b]: a ring around the cursor fills while you hold. Let go early, press Esc or right-click to cancel.
+[*][b]Short notices[/b] ("Teleporting in 3...") tell you what is happening.
+[/list]
+
+[center][img]{IMG_MAP}[/img]
+
+[img]{IMG_ARRIVAL}[/img][/center]
+
+[line]
+
+[size=4][b]Installation[/b][/size]
+
+[list=1]
+[*]Close Enshrouded.
+[*]Open the game folder (Steam: right-click Enshrouded > Manage > Browse local files).
+[*]Copy everything from the zip into it, keeping the folders: [b]dbgcore.dll[/b] next to [i]enshrouded.exe[/i], and the [b]greeneye\map-teleport[/b] folder.
+[*]Start the game, open the map, hold [b]Shift[/b] and hold the left mouse button on a spot.
+[/list]
+
+[b]Dedicated server:[/b] copy the same files next to [i]enshrouded_server.exe[/i] and restart the server. Every player who wants to teleport needs the mod on their game too.
+
+[b]Install by hand:[/b] Vortex does not know the Greeneye Loader yet.
+
+[b]Uninstall:[/b] delete [i]greeneye\map-teleport[/i]; if no other Greeneye mod is left, also [i]dbgcore.dll[/i] and the [i]greeneye[/i] folder.
+
+[line]
+
+[size=4][b]Settings[/b][/size]
+
+More settings are in [i]greeneye\map-teleport\map-teleport.ini[/i], each explained in the file. For example, arrive high above the spot and glide down, or hide the mod's notices. Restart the game (or the server) after changing it.
+
+[line]
+
+[size=4][b]Compatibility[/b][/size]
+
+[list]
+[*][b]Single player, hosting your own game, and dedicated servers[/b] (install it on the server too).
+[*][b]Plays well with other mods.[/b] It runs through the Greeneye Loader ([i]dbgcore.dll[/i], shared with Find, Quick Deposit and Continue), and where another mod such as Creative Mode hooks the same game function, it chains onto that hook.
+[*][b]Safe on game updates.[/b] Made for the current game version. After an update the mod checks that it still recognises the game; if it does not, it switches itself off instead of risking a crash.
+[*]Works with Steam. Not tested with other store versions.
+[/list]
+
+[line]
+
+[size=4][b]Troubleshooting[/b][/size]
+
+If something doesn't work, please post this file with your report:
+[list]
+[*][i]greeneye\loader.log[/i] in the game folder: what the Greeneye Loader and the mod did (the mod's lines start with "Map Teleport:").
+[*]On a dedicated server, also [i]greeneye\loader.log[/i] from the server folder.
+[/list]
+
+[line]
+
+[size=4][b]Changelog[/b][/size]
+
+[b]1.0.0[/b]
+[list]
+[*]First release.
+[/list]
+
+[line]
+
+[size=2]Made with the help of AI (Claude by Anthropic).[/size]

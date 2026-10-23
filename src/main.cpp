@@ -1,0 +1,243 @@
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <cstdint>
+#include <cstring>
+#include <cstdio>
+#include "greeneye.h"
+#include "countdown.h"
+#include "travel.h"
+#include "popup.h"
+#include "identity.h"
+#include "journey.h"
+#include "protection.h"
+
+namespace {
+template<class T> T& at(void* p,size_t n) {return *reinterpret_cast<T*>(static_cast<uint8_t*>(p)+n);}
+using MapFn=void(*)(void*,uint8_t*);
+using LoopFn=void(*)(void*);
+using DispatchFn=void(*)(void*,void*);
+using DrawFn=void(*)(void*,const float*,const uint32_t*,const uint64_t*);
+using ViewFn=void(*)(void*,void*,uint8_t);
+MapFn nextMap=nullptr; LoopFn nextLoop=nullptr; DispatchFn dispatch=nullptr;
+LoopFn nextPlay=nullptr;
+DrawFn draw=nullptr; ViewFn updateView=nullptr;
+void** root=nullptr;
+void* currentApp=nullptr;
+// UI snapshots and the live game client are distinct objects. Use the command
+// loop's live client for world identity, player state, and command dispatch.
+void* GameClient(void* app) {
+    auto ui=app?at<void*>(app,0x35280):nullptr;
+    return ui?at<void*>(ui,0x1b8):nullptr;
+}
+teleport::Countdown countdown;
+uint64_t frame=0,seen=0;
+void* owner=nullptr; void* world=nullptr;
+bool lastDown=true, swallow=false, paused=false, broken=false;
+struct Watching {
+    void* client{};void* world{};uint64_t nonce{},nextPoll{},deadline{};
+    uint32_t entity{};bool remote{};
+    teleport::NoticePhase shown=teleport::NoticePhase::failed;unsigned countdown=0;bool prank=false;
+} watching;
+void Log(const char* message) {greeneye::Host()->log(message);}
+bool Down(int key) {return (GetAsyncKeyState(key)&0x8000)!=0;}
+bool Cursor(float& x,float& y) {
+    HWND w=GetForegroundWindow(); DWORD pid=0; GetWindowThreadProcessId(w,&pid);
+    POINT p{}; RECT r{};
+    if(pid!=GetCurrentProcessId()||!GetCursorPos(&p)||!ScreenToClient(w,&p)||!GetClientRect(w,&r)||r.right<=0||r.bottom<=0||p.x<0||p.y<0||p.x>=r.right||p.y>=r.bottom) return false;
+    x=p.x*(1080.f/r.bottom); y=p.y*(1080.f/r.bottom); return true;
+}
+void Cancel(const char* reason="state reset") {
+    if(countdown.active) {char message[160];sprintf_s(message,"Map Teleport: hold ended (%s), elapsed=%llu ms",reason,GetTickCount64()-countdown.started);Log(message);}
+    countdown.cancel();owner=nullptr;world=nullptr;
+}
+void Ring(void*,float x,float y,float progress) {teleport::popup::DrawRing(x,y,progress);}
+bool MapFrame(void* widget,uint8_t* state) {
+    if(paused||broken) return false;
+    bool consecutive=seen+1==frame || seen==frame;
+    seen=frame;
+    float x=0,y=0; bool focused=Cursor(x,y), down=Down(VK_LBUTTON);
+    if(!consecutive) {Cancel("map frame gap");lastDown=down;swallow=false;}
+    bool clicked=down&&!lastDown; lastDown=down;
+    if(!down) Cancel("mouse released in map"); // early release cancels
+    if(!focused||Down(VK_ESCAPE)||Down(VK_RBUTTON)) {Cancel("map focus or cancel key");return false;}
+    auto* client=GameClient(currentApp);
+    auto* currentWorld=client?at<void*>(client,0x47d4e0):nullptr;
+    auto* view=state?at<uint8_t*>(state,8):nullptr;
+    if(!currentWorld||!view) {Cancel("missing world or view");return false;}
+    if(countdown.active&&(owner!=state||world!=currentWorld)) Cancel("map owner or world changed");
+    bool chord=Down(VK_SHIFT);
+    if(clicked&&chord&&!countdown.active) {
+        teleport::Destination target{};
+        float ox=at<float>(view,0x1e0)+at<float>(view,0x17c)-at<float>(view,0x1e8);
+        float oy=at<float>(view,0x1e4)+at<float>(view,0x180)-at<float>(view,0x1ec);
+        if(teleport::Convert(x,y,ox,oy,at<float>(view,0x10),at<float>(view,0x38),at<float>(view,0x3c),target)) {
+            countdown.start(GetTickCount64(),target); owner=state;world=currentWorld;swallow=true;
+            Log("Map Teleport: countdown started");
+        }
+    }
+    bool block=countdown.active||swallow;
+    if(block) {
+        at<uint8_t>(state,0xf8)=0; at<uint64_t>(state,0x56310)=0;at<uint64_t>(state,0x28)=0;
+        alignas(16) uint8_t action[64]{}; updateView(view,action,1);
+    }
+    if(!down) swallow=false; // swallow the release frame too
+    if(countdown.active) Ring(widget,x,y,countdown.progress(GetTickCount64()));
+    return block;
+}
+bool SafeMap(void* widget,uint8_t* state) {
+    __try {return MapFrame(widget,state);} __except(EXCEPTION_EXECUTE_HANDLER) {Cancel();broken=true;Log("Map Teleport: disabled after invalid game state");return false;}
+}
+void MapHook(void* widget,uint8_t* state) {
+    greeneye::Lease lease;
+    if(!lease || !SafeMap(widget,state)) nextMap(widget,state);
+}
+void EndFrame(void* app) {
+    if(paused||broken) {Cancel();return;}
+    float x,y;
+    // Recheck LMB here too: it can be released between map rendering and dispatch.
+    if(seen!=frame) {Cancel("dispatch without map frame");return;}
+    if(!Cursor(x,y)||!Down(VK_LBUTTON)||Down(VK_ESCAPE)||Down(VK_RBUTTON)) {Cancel("dispatch focus, mouse release or cancel key");return;}
+    if(!countdown.due(GetTickCount64())) return;
+    auto* client=GameClient(app);
+    if(!client||at<void*>(client,0x47d4e0)!=world) {Cancel("dispatch world mismatch");return;}
+    auto target=countdown.target;
+    teleport::travel::SetClient(client);
+    Cancel(); // one dispatch per click, including across subsequent frames
+    uint32_t entity=(at<uint32_t>(client,0x466b44)&0x3f)+1;
+    if(watching.nonce){teleport::popup::Show("Embervale Teleport Services","A teleport is already in progress.",2000);return;}
+    uint64_t now=GetTickCount64();
+    watching={client,at<void*>(client,0x47d4e0),0,now+500,now+35000,entity};
+    auto submitted=teleport::travel::SubmitLocal(entity,target);
+    if(submitted==teleport::travel::Submission::queued)watching.nonce=teleport::travel::Latest(entity).nonce;
+    else if(submitted==teleport::travel::Submission::rejected) {
+        watching={};teleport::popup::Show("Embervale Teleport Services","The host is busy or teleporting is unavailable. Please try again shortly.",4000);return;
+    } else {
+        auto account=teleport::LocalAccount();
+        if(!account){watching={};teleport::popup::Show("Embervale Teleport Services","Could not identify this player's account. Teleport cancelled.",5000);return;}
+        static uint64_t lastNonce=0;lastNonce=now>lastNonce?now:lastNonce+1;
+        watching.nonce=lastNonce;watching.remote=true;
+        teleport::travel::TrackRemote(watching.nonce,account);
+        char text[96];int len=sprintf_s(text,"/mt1 %llu %lld %lld",watching.nonce,target.x,target.z);
+        if(len<=0)return;
+        alignas(8) uint8_t command[0x410]{};command[0]=0x74;
+        memcpy(command+2,text,size_t(len));at<uint16_t>(command,0x402)=uint16_t(len);
+        dispatch(client,command);
+    }
+    // Shift-only confirmation needs no Ctrl-release delay before returning to play.
+    alignas(8) uint8_t openPlay[0x410]{};openPlay[0]=0x01;openPlay[1]=1;dispatch(client,openPlay);
+    Log("Map Teleport: travel request queued; waiting for host terrain resolution");
+}
+void StatusFrame(void* app) {
+    using namespace teleport;
+    auto current=GameClient(app);
+    auto currentWorld=current?at<void*>(current,0x47d4e0):nullptr;
+    travel::SetClient(currentWorld?current:nullptr);
+    if(!currentWorld){watching={};popup::Clear();return;}
+    uint32_t entity=(at<uint32_t>(current,0x466b44)&0x3f)+1;
+    if(watching.nonce&&(watching.client!=current||watching.world!=currentWorld)){watching={};travel::TrackRemote(0,LocalAccount());popup::Clear();}
+    auto send=[&](const char* text){alignas(8) uint8_t command[0x410]{};command[0]=0x74;auto len=strlen(text);memcpy(command+2,text,len);at<uint16_t>(command,0x402)=uint16_t(len);dispatch(current,command);};
+    if(!watching.nonce) {
+        auto local=travel::LocalStatus(entity),remote=travel::RemoteStatus();
+        auto active=local.protection&&!Finished(local)?local:remote;
+        if(active.nonce&&active.protection&&!Finished(active))watching={current,currentWorld,active.nonce,0,GetTickCount64()+35000,entity,active.nonce==remote.nonce};
+        else {
+            static uint64_t discovery=0;
+            if(GetTickCount64()>=discovery){discovery=GetTickCount64()+2000;send("/mtp1 0");}
+            return;
+        }
+    }
+    auto now=GetTickCount64();Status status{watching.nonce};
+    if(watching.remote) {
+        status=travel::RemoteStatus();
+        if(!Finished(status)&&now>=watching.nextPoll&&now<watching.deadline) {
+            watching.nextPoll=now+500;
+            char text[64];auto ack=travel::ClientProtectionAck();
+            if(status.protection&&ack)sprintf_s(text,"/mta1 %llu %u",watching.nonce,ack);
+            else sprintf_s(text,"/mtp1 %llu",watching.nonce);
+            send(text);
+        }
+    } else {
+        status=travel::LocalStatus(watching.entity);
+        if(status.nonce!=watching.nonce)status.phase=NoticePhase::failed;
+    }
+    watching.prank=watching.prank||status.protection;
+    if(status.phase!=watching.shown||status.countdown!=watching.countdown)watching.deadline=now+35000;
+    if(!Finished(status)&&now>=watching.deadline) {
+        popup::Show("Embervale Teleport Services",status.phase==NoticePhase::waiting?
+            "Teleport preparation is taking longer than expected. Your request is still pending.":
+            "The host has not confirmed arrival. Please wait before trying another teleport.",6000);
+        if(status.protection){watching.deadline=now+35000;return;}
+        watching={};travel::TrackRemote(0,LocalAccount());return;
+    }
+    if(status.phase!=watching.shown||status.countdown!=watching.countdown) {
+        watching.shown=status.phase;watching.countdown=status.countdown;
+        std::string_view message;char countdownText[48]{};
+        switch(status.phase) {
+            case NoticePhase::waiting:message="Preparing your teleport...";break;
+            case NoticePhase::countdown:sprintf_s(countdownText,"Teleporting in %u...",status.countdown);message=countdownText;break;
+            case NoticePhase::scenic:message=scenarios[status.scenario].opening;break;
+            case NoticePhase::problem:message=scenarios[status.scenario].problem;break;
+            case NoticePhase::correction:message=scenarios[status.scenario].correction;break;
+            case NoticePhase::returning:break; // Keep the preceding text; do not restart its typewriter.
+            case NoticePhase::complete:message=watching.prank?"We assure you this service error will not happen again. Thank you for choosing Embervale Teleport Services.":"Thank you for choosing Embervale Teleport Services.";break;
+            case NoticePhase::failed:message="Teleport could not be completed. Check the host's Map Teleport log.";break;
+            case NoticePhase::ascending:popup::Clear();break;
+            default:break;
+        }
+        uint64_t displayMs=Finished(status)?(watching.prank?7000:4000):7000;
+        if(status.phase==NoticePhase::countdown)displayMs=2000;
+        else if(status.phase==NoticePhase::problem)displayMs=problemMs;
+        else if(status.phase==NoticePhase::scenic)displayMs=scenicMs;
+        else if(status.phase==NoticePhase::correction)displayMs=correctionMs;
+        if(!message.empty())popup::Show("Embervale Teleport Services",std::string(message),displayMs,status.phase!=NoticePhase::countdown);
+    }
+    if(Finished(status)){watching={};travel::TrackRemote(0,LocalAccount());}
+}
+void SafeStatus(void* app){__try{StatusFrame(app);}__except(EXCEPTION_EXECUTE_HANDLER){watching={};Log("Map Teleport: notice tracking failed; active protection retained");}}
+void SafeEnd(void* app) {__try {EndFrame(app);} __except(EXCEPTION_EXECUTE_HANDLER) {Cancel();broken=true;Log("Map Teleport: dispatch disabled after invalid game state");}}
+void LoopHook(void* app) {
+    greeneye::Lease lease;
+    if(!lease) {nextLoop(app);return;}
+    // This consumes UI commands; the map is drawn BETWEEN calls, not inside this function.
+    currentApp=app;
+    nextLoop(app); SafeStatus(app); SafeEnd(app); ++frame;
+}
+void DrawPopup(){__try{teleport::popup::Draw();}__except(EXCEPTION_EXECUTE_HANDLER){teleport::popup::Clear();Log("Map Teleport: native notice rendering failed");}}
+void PlayHook(void* self){greeneye::Lease lease;if(lease)DrawPopup();nextPlay(self);}
+bool Prepare(){paused=true;Cancel();if(watching.nonce||!teleport::travel::Prepare())return false;teleport::popup::Clear();return true;}
+bool Ready(){return true;}
+void Resume(){paused=false;lastDown=true;teleport::travel::Resume();}
+}
+GREENEYE_MOD_START {
+    if(!greeneye::HostHasHooks(host)||!host->find||!host->read) return false;
+    greeneye::UseHost(host);
+    auto* exe=reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
+    auto* nt=reinterpret_cast<IMAGE_NT_HEADERS64*>(exe+reinterpret_cast<IMAGE_DOS_HEADER*>(exe)->e_lfanew);
+    bool serverSide=host->side==kGreeneyeServer;
+    if(nt->FileHeader.TimeDateStamp!=(serverSide?0x6ad77f14u:0x6ad77f0cu) || nt->OptionalHeader.SizeOfImage!=(serverSide?0x1dd1000u:0x2a1e000u)) {
+        Log("Map Teleport: unverified game build; no hooks installed");return false;
+    }
+    if(!greeneye::ClaimProcess(L"MapTeleport",host)) return false;
+    if(!teleport::protection::Init(host)){Log("Map Teleport: protection bindings unavailable; disabled");return false;}
+    if(!teleport::travel::Init(host)) {Log("Map Teleport: host bindings unavailable; disabled");return false;}
+    if(serverSide) {Log("Embervale Teleport 1.0.0: server companion loaded");return true;}
+    auto mapTail=host->find("48 8D AC 24 A0 F8 FF FF 48 81 EC 60 08 00 00 48 8B 05",nullptr);
+    auto loop=host->find("40 53 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 48 8D 81 58 4F 03 00",nullptr);
+    auto send=host->find("4C 8B DC 55 56 57 49 8D AB 18 FF FF FF",nullptr);
+    auto image=host->find("4D 8B 09 45 8B 00 E9 ?? ?? ?? ?? CC",nullptr);
+    auto view=host->find("48 8B C4 48 89 58 20 55 56 57 41 56 41 57 48 8D 68 98 48 81 EC 40 01 00 00",nullptr);
+    auto play=host->find("4C 8B DC 55 49 8D AB E8 FD FF FF 48 81 EC 10 03 00 00",nullptr);
+    if(!mapTail||!loop||!send||!image||!view||!play) {Log("Map Teleport: unsupported game signatures; no UI hooks installed");return false;}
+    int32_t displacement=0;host->read(mapTail+0x12,&displacement,4);
+    root=reinterpret_cast<void**>(mapTail+0x16+displacement);
+    if(!teleport::popup::Init(host,root)){Log("Map Teleport: native notice bindings unavailable");return false;}
+    dispatch=reinterpret_cast<DispatchFn>(send);draw=reinterpret_cast<DrawFn>(image);updateView=reinterpret_cast<ViewFn>(view);
+    nextMap=reinterpret_cast<MapFn>(host->hook(mapTail-16,reinterpret_cast<void*>(MapHook),16,nullptr,0));
+    nextLoop=reinterpret_cast<LoopFn>(host->hook(loop,reinterpret_cast<void*>(LoopHook),13,nullptr,0));
+    nextPlay=reinterpret_cast<LoopFn>(host->hook(play,reinterpret_cast<void*>(PlayHook),18,nullptr,0));
+    if(!nextMap||!nextLoop||!nextPlay) {paused=true;Log("Map Teleport: hook installation failed");return false;}
+    Log("Embervale Teleport 1.0.0: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
+}
+GREENEYE_MOD_HOT {static const GreeneyeHot api{sizeof(GreeneyeHot),Prepare,Ready,Resume};return &api;}
+BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {if(reason==DLL_PROCESS_ATTACH) DisableThreadLibraryCalls(instance);return TRUE;}
