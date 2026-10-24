@@ -1,0 +1,2 @@
+1.1.4
+- Fixed: a teleport onto a narrow, deep pit (such as a shaft in a ruin) landed you at its bottom. It now lands you on the ground around the pit, where the map shows it.

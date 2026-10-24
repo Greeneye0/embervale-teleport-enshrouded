@@ -54,7 +54,7 @@ struct Pending {
     bool deluxe{};
     Journey trip{};bool journaled{},clientReady{},clientRestored{},recovery{};
     uint64_t retryAfter{};
-    int64_t groundY{};bool groundRead{},groundLogged{}; // ground confirmation, see Ground()
+    int64_t groundY{};bool groundRead{},groundLogged{},pitChecked{};uint64_t pitSince{}; // ground confirmation, see Ground()
     uint8_t transform[56]{};bool haveTransform=false;
 };
 Pending requests[16]{};
@@ -118,6 +118,37 @@ void Recover(Pending& p) {
     else{Record(p,Outcome::failed);p={};}
 }
 double Metres(int64_t v){return double(v)/4294967296.;}
+// Decided once per request: look 4, 6 and 8 m around the target; when it is the floor of a
+// narrow pit, move the target to the rim (see PitRim). Ring rays start 64 m above the floor,
+// enough to tell a rim 20 m up and far fewer cells to load than a ray from the sky; one that
+// starts inside solid ground counts as 64 m higher. Ring cells get eight seconds to load,
+// then a missing one counts as unknown. False while ring cells are still loading.
+bool Opening(Pending& p,Destination first,Destination& target) {
+    if(p.pitChecked)return true;
+    constexpr int64_t metre=4294967296LL;
+    auto now=GetTickCount64();if(!p.pitSince)p.pitSince=now;
+    bool patient=now-p.pitSince<8000;
+    double start=Metres(target.y+64*metre);
+    for(double radius:{4.0,6.0,8.0}) {
+        Destination ring[8];int64_t heights[8]{};bool valid[8]{};
+        for(size_t i=0;i<8;++i) {
+            double angle=double(i)*0.78539816339744831;
+            ring[i]=first;ring[i].x+=int64_t(radius*std::cos(angle)*4294967296.0);ring[i].z+=int64_t(radius*std::sin(angle)*4294967296.0);
+            int64_t top=0;auto surface=TopSurface(ray,hostWorld.terrain,hostWorld.realm,ring[i],nullptr,&top,start);
+            if(surface==Surface::loading){if(patient)return false;continue;}
+            if(surface==Surface::ready&&ring[i].y>=top-metre){ring[i].y=top;valid[i]=true;}
+            else valid[i]=surface==Surface::ready&&PlausibleGround(boundsKnown,bounds,ring[i],0);
+            heights[i]=ring[i].y;
+        }
+        auto best=PitRim(target.y,heights,valid,8);
+        if(best<0)continue;
+        char line[200];sprintf_s(line,"Map Teleport: target is the floor of a pit (%.1f m, ground around it %.1f m within %.0f m); landing on the rim at %.1f, %.1f",
+            Metres(target.y),Metres(ring[best].y),radius,Metres(ring[best].x),Metres(ring[best].z));
+        Log(line);
+        target=ring[best];p.pitChecked=true;return true;
+    }
+    p.pitChecked=true;return true;
+}
 // The ground under p.target, checked twice before use. A hit above the world limit or at
 // the ray's start is cast again from four metres under the limit; landing above the limit
 // would send the player to their altar. Readings must agree on two consecutive ticks, so a
@@ -138,6 +169,7 @@ Surface Ground(Pending& p,Destination& target,const char** reason=nullptr) {
         if(!fixed)surface=Surface::loading; // try again next tick until the request expires
     }
     if(surface!=Surface::ready){p.groundRead=false;return surface;}
+    if(!Opening(p,first,target)){p.groundRead=false;return Surface::loading;}
     if(!p.groundRead||!SameGround(p.groundY,target.y)){p.groundRead=true;p.groundY=target.y;return Surface::checking;}
     return surface;
 }

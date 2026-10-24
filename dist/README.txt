@@ -1,4 +1,4 @@
-EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.3
+EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.4
 ==========================================================================
 
 Open the world map, hold Shift and hold the left mouse button on any spot for one second.
@@ -34,7 +34,7 @@ The mod has to be on the server AND on the game of every player who wants to tel
        greeneye\map-teleport\...
 4. Start the server.
 5. Check it loaded: greeneye\loader.log in the server folder should contain
-   "Embervale Teleport 1.1.3: server companion loaded".
+   "Embervale Teleport 1.1.4: server companion loaded".
 Players: each player installs the mod on their own game as above. Players without the mod
 can still join and play; they just can't teleport, and see nothing from the mod.
 Settings: the server's own map-teleport.ini decides how teleports behave for everyone on
@@ -97,6 +97,11 @@ GOOD TO KNOW
 
 CHANGES
 -------
+1.1.4
+- Fixed: a teleport onto a narrow, deep pit (such as a shaft in a ruin) landed you
+  at its bottom. It now lands you on the ground around the pit, where the map
+  shows it.
+
 1.1.3
 - Map teleport now works in the shroud, while falling and under water, where the
   game's own fast travel is blocked. It plays the usual teleport animation.

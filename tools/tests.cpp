@@ -190,6 +190,13 @@ int main() {
      g.y=256*m-m/2;assert(!PlausibleGround(false,readBounds,g,256*m));
      g.y=0;assert(!PlausibleGround(true,readBounds,g,0));
      assert(SameGround(100*m,100*m+m/2)&&SameGround(100*m+m/2,100*m)&&!SameGround(100*m,101*m));
+     // The pit found in game: 56 m deep, ground about 768 m, a 810 m tower beside it.
+     int64_t ring[8]={768*m,769*m,810*m,769*m,768*m,768*m+m/2,810*m,769*m};bool ok[8];for(auto& v:ok)v=true;
+     auto rim=PitRim(712*m+m/2,ring,ok,8);assert(rim>=0&&ring[rim]>=768*m&&ring[rim]<=769*m);
+     ring[0]=716*m;assert(PitRim(712*m,ring,ok,8)>=0);                 // seven higher: a pit
+     ring[1]=716*m;assert(PitRim(712*m,ring,ok,8)==-1);                // six higher: open, keep
+     for(auto& v:ring)v=730*m;assert(PitRim(712*m,ring,ok,8)==-1);    // 18 m: a valley, keep
+     for(auto& v:ring)v=800*m;ok[0]=ok[1]=false;assert(PitRim(712*m,ring,ok,8)==-1); // unknown
  }
  Put<uint64_t>(boundsManager.data(),0xb8,0);assert(!ReadWorldBounds(boundsManager.data(),readBounds));
  std::wstring ini=std::wstring(filename)+L".ini";
@@ -223,5 +230,5 @@ int main() {
  puts("PASS: all three prank scripts, protection/arrival acknowledgments, recovery at every phase, independent deluxe policy");
  puts("PASS: INI switches, persistent per-account history, interrupted/completed visits, corrupt history rejection");
  puts("PASS: scene-bound altitude selection, boundary rejection and insufficient headroom (native enforcement unverified)");
- puts("PASS: ground above the world limit or at the ray start is rechecked; lower ray start; two-reading agreement");
+ puts("PASS: ground above the world limit or at the ray start is rechecked; lower ray start; two-reading agreement; pits land on the rim");
 }
