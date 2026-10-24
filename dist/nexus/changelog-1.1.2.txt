@@ -1,0 +1,2 @@
+1.1.2
+- Runs on other builds of the game too (after a game patch, or copies whose exe differs from Steam's) when it recognises the game code; before, it switched itself off on any build but the current Steam one.

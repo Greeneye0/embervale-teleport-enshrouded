@@ -25,7 +25,7 @@ tools\tests.bat    -> simulations plus signature checks (needs the game and serv
 
 The mod runs through the Greeneye Loader (API 2, `src/greeneye.h`). All hooks go through the loader, which chains onto other mods' hooks instead of overwriting them. Every detour holds a `greeneye::Lease`, so the mod can be hot reloaded while idle.
 
-It only runs on the game builds it was made for (checked by PE timestamp and image size). On any other build it installs nothing.
+Every game function is found by byte signature (`host->find`); if any binding is missing the mod installs nothing. Builds other than the ones it was tested on (PE timestamp and image size) are logged as untested and run when the signatures match.
 
 `docs/` has the design notes and the gameplay test plan written during development.
 
