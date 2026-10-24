@@ -54,6 +54,7 @@ struct Pending {
     bool deluxe{};
     Journey trip{};bool journaled{},clientReady{},clientRestored{},recovery{};
     uint64_t retryAfter{};
+    int64_t groundY{};bool groundRead{},groundLogged{}; // ground confirmation, see Ground()
     uint8_t transform[56]{};bool haveTransform=false;
 };
 Pending requests[16]{};
@@ -66,7 +67,7 @@ uint64_t predictedLandingSince{};
 struct World {void* storage{};void* terrain{};uint64_t seen{};uint8_t realm{};};
 World hostWorld{};
 World terrainSources[16]{};
-struct Injection {void* input{};void* control{};void* command{};void* storage{};uint32_t entity{},consumed{};uint8_t saved[12]{};};
+struct Injection {void* input{};void* control{};void* command{};void* storage{};uint32_t entity{},consumed{};uint8_t saved[12]{};uint8_t refusal{},mode{};};
 thread_local Injection injection;
 using QueueCommand=void*(*)(void*,void*,uint8_t,uint32_t,uint32_t);
 using NotifyTeleport=bool(*)(void*,uint32_t,uint32_t);
@@ -115,6 +116,30 @@ Status Describe(const Pending& p) {
 void Recover(Pending& p) {
     if(p.journaled){p.trip.recover();p.stage=Stage::journey;p.retryAfter=GetTickCount64()+1000;p.expires=GetTickCount64()+30000;}
     else{Record(p,Outcome::failed);p={};}
+}
+double Metres(int64_t v){return double(v)/4294967296.;}
+// The ground under p.target, checked twice before use. A hit above the world limit or at
+// the ray's start is cast again from four metres under the limit; landing above the limit
+// would send the player to their altar. Readings must agree on two consecutive ticks, so a
+// value read the moment terrain cells finish loading is never used on its own.
+Surface Ground(Pending& p,Destination& target,const char** reason=nullptr) {
+    int64_t top=0;auto first=target;
+    auto surface=TopSurface(ray,hostWorld.terrain,hostWorld.realm,target,reason,&top);
+    if(surface==Surface::ready&&!PlausibleGround(boundsKnown,bounds,target,top)) {
+        int64_t from=boundsKnown?bounds.maximum.y-4*4294967296LL:top-2*4294967296LL;
+        auto suspect=target;target=first;int64_t again=0;
+        surface=TopSurface(ray,hostWorld.terrain,hostWorld.realm,target,reason,&again,Metres(from));
+        bool fixed=surface==Surface::ready&&PlausibleGround(boundsKnown,bounds,target,again);
+        if(!p.groundLogged) {
+            char line[256];sprintf_s(line,"Map Teleport: ground at %.1f m is above the world limit (%s%.1f m) or at the ray start (%.1f m); recheck from %.1f m %s %.1f m",
+                Metres(suspect.y),boundsKnown?"":"unknown, ",boundsKnown?Metres(bounds.maximum.y):0.,Metres(top),Metres(again),fixed?"found ground at":"found nothing usable; last",Metres(target.y));
+            Log(line);p.groundLogged=true;
+        }
+        if(!fixed)surface=Surface::loading; // try again next tick until the request expires
+    }
+    if(surface!=Surface::ready){p.groundRead=false;return surface;}
+    if(!p.groundRead||!SameGround(p.groundY,target.y)){p.groundRead=true;p.groundY=target.y;return Surface::checking;}
+    return surface;
 }
 bool Retire(Pending& p) {
     if((p.journaled||p.recovery)&&!protection::Disable(p.storage,p.entity))return false;
@@ -174,8 +199,18 @@ void* GroundHook(void* result,void* material,void* descriptors) {
     greeneye::Lease lease;if(lease)SafeCaptureTerrain(descriptors);
     return groundQuery(result,material,descriptors);
 }
+// The native travel gate (also used by fast travel) answers 1 = travel disabled in this area
+// (mode byte not 0/1), 2 = falling, 4 = under water. Map teleport goes anyway, so the game's
+// own action, animation included, runs as usual. Only the action this mod injected is affected.
+using Gate=uint8_t*(*)(uint8_t*,char,uint64_t);Gate gate{};
+uint8_t* GateHook(uint8_t* out,char mode,uint64_t flags) {
+    greeneye::Lease lease;auto result=gate(out,mode,flags);
+    if(lease&&injection.input&&*result){injection.refusal=*result;injection.mode=uint8_t(mode);*result=0;}
+    return result;
+}
 void FinishInjection() {
     auto saved=injection;injection={};if(!saved.input)return;
+    bool taken=at<uint32_t>(saved.control,0x54)!=saved.consumed; // the game consumed the injected action
     // Restore the real input and its consumed version before processing the next player.
     // This prevents the temporary action from replaying an older network input next frame.
     memcpy(static_cast<uint8_t*>(saved.input)+0x174,saved.saved,12);
@@ -185,7 +220,14 @@ void FinishInjection() {
     for(auto& p:requests)if(p.entity==saved.entity&&p.storage==saved.storage&&p.stage==Stage::injecting) {
         if(accepted)p.stage=Stage::armed;else Recover(p);
         p.expires=GetTickCount64()+30000;
-        Log(accepted?"Map Teleport: native travel action accepted":"Map Teleport: native travel action rejected; no movement requested");
+        if(saved.refusal) {
+            std::string why;
+            for(auto [bit,text]:{std::pair{1,"travel disabled here"},{2,"falling"},{4,"under water"}})if(saved.refusal&bit)why+=(why.empty()?"":", ")+std::string(text);
+            char line[200];sprintf_s(line,"Map Teleport: game travel gate refused (%s; area mode %u); teleporting anyway",why.c_str(),unsigned(saved.mode));
+            Log(line);
+        }
+        Log(accepted?"Map Teleport: native travel action accepted":taken?"Map Teleport: native travel action rejected after it was taken; no movement requested":
+            "Map Teleport: native travel action not taken (character busy); no movement requested");
     }
 }
 void Player(void* ctx,void* descriptors) {
@@ -254,7 +296,8 @@ void Player(void* ctx,void* descriptors) {
         if(p.stage==Stage::resolving&&wantsPrank&&!p.journaled) {
             Destination ground=p.target,high{};
             const char* terrainReason=nullptr;
-            auto surface=TopSurface(ray,hostWorld.terrain,hostWorld.realm,ground,&terrainReason);
+            auto surface=Ground(p,ground,&terrainReason);
+            if(surface==Surface::checking)continue;
             if(surface==Surface::loading){
                 if(now>=p.retryAfter){Log(hostWorld.terrain?"Map Teleport: prank preparation waiting for terrain cells":"Map Teleport: prank preparation waiting for terrain resource");p.retryAfter=now+5000;}
                 continue;
@@ -341,7 +384,8 @@ bool Apply(void* ctx,void* descriptors) {
             Log("Map Teleport: request expired; movement cancelled");return true;
         }
         if(hostWorld.storage!=storage)return false;
-        auto surface=p.journaled?Surface::ready:TopSurface(ray,hostWorld.terrain,hostWorld.realm,p.target);
+        auto surface=p.journaled?Surface::ready:Ground(p,p.target);
+        if(surface==Surface::checking)return false; // confirm the ground on the next tick
         if(surface==Surface::loading) {
             if(GetTickCount64()>=p.retryAfter) {
                 Log(hostWorld.terrain?"Map Teleport: waiting for terrain ray cells to load":"Map Teleport: waiting for terrain resource from ECS world registry");
@@ -371,7 +415,9 @@ bool Apply(void* ctx,void* descriptors) {
         // treat writing the Teleport component as proof of arrival.
         application={at<void*>(descriptors,0x10),storage,id,p.nonce,p.target};
         p.stage=Stage::applying;
-        Log("Map Teleport: terrain destination supplied; awaiting native position update");return true;
+        char line[200];sprintf_s(line,"Map Teleport: terrain destination supplied at %.1f, %.1f, %.1f (world limit %s%.1f m); awaiting native position update",
+            Metres(p.target.x),Metres(p.target.y),Metres(p.target.z),boundsKnown?"":"unknown, ",boundsKnown?Metres(bounds.maximum.y):0.);
+        Log(line);return true;
     }
     return true;
 }
@@ -509,6 +555,10 @@ bool Init(const GreeneyeHost* host) {
     notifyTeleport=reinterpret_cast<NotifyTeleport>(host->find(native::notifyTeleportPattern,nullptr));
     if(!queueCommand||!notifyTeleport||!p||!a||!n||!entityOf||!dirty||!ray||!r||!chat||!limits||!ground)return false;
     if(!CallMatches(host,p+0x36,n)||!CallMatches(host,p+0x21f6,n)||!CallMatches(host,a+0x31,n)||!CallMatches(host,a+0x7be,n))return false;
+    // Optional: without the gate the game's own travel restrictions still apply.
+    auto g=host->find("C6 01 00 49 0F BA E0 0E 72 ?? 32 C0 84 D2 74 ?? 80 FA 01 74 ?? C6 01 01 B0 01 49 0F BA E0 2C",nullptr);
+    if(g&&p&&CallMatches(host,p+0xfb2,g))gate=reinterpret_cast<Gate>(host->redirectCall(p+0xfb2,reinterpret_cast<void*>(GateHook)));
+    if(!gate)Log("Map Teleport: travel gate not found; the game's travel restrictions apply to map teleport");
     playerFirst=reinterpret_cast<Next>(host->redirectCall(p+0x36,reinterpret_cast<void*>(PlayerFirst)));
     playerMore=reinterpret_cast<Next>(host->redirectCall(p+0x21f6,reinterpret_cast<void*>(PlayerMore)));
     applyFirst=reinterpret_cast<Next>(host->redirectCall(a+0x31,reinterpret_cast<void*>(ApplyFirst)));

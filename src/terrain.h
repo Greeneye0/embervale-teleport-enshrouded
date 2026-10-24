@@ -2,14 +2,18 @@
 #include "countdown.h"
 #include <cstring>
 namespace teleport {
-enum class Surface { ready, loading, invalid };
+// checking: a ground reading waits for its confirming second reading (travel.cpp Ground).
+enum class Surface { ready, loading, invalid, checking };
 using TerrainRay=void*(*)(void*,void*,const float*,const float*,const uint8_t*);
 template<class T> inline T field(const void* p,size_t offset) {
     T value;std::memcpy(&value,static_cast<const uint8_t*>(p)+offset,sizeof(T));return value;
 }
 // Bounds come from the realm's voxel grid, not a guessed world height. RayQuery's
 // +0x12 says all traversed cells were available; +0x13 says a surface was hit.
-inline Surface TopSurface(TerrainRay ray,void* terrain,uint8_t realm,Destination& p,const char** reason=nullptr) {
+// startY (metres) starts the ray lower than the grid top, for a recheck below the world limit.
+// rayTop receives where the ray started, in 32.32 metres.
+inline Surface TopSurface(TerrainRay ray,void* terrain,uint8_t realm,Destination& p,const char** reason=nullptr,
+                          int64_t* rayTop=nullptr,double startY=NAN) {
     if(reason)*reason="terrain resource unavailable";
     if(!terrain||!ray) return Surface::loading;
     auto count=field<uint64_t>(terrain,0x1c00);
@@ -27,7 +31,10 @@ inline Surface TopSurface(TerrainRay ray,void* terrain,uint8_t realm,Destination
     double x=double(p.x)/4294967296.0,z=double(p.z)/4294967296.0;
     if(reason)*reason="destination outside voxel grid";
     if(height>32768||x<ox||z<oz||x>=ox+nx*size||z>=oz+nx*size) return Surface::invalid;
-    alignas(16) float from[4]={float(x),float(oy+height+0.25),float(z),0};
+    double top=oy+height+0.25;
+    if(std::isfinite(startY)&&startY>oy&&startY<top)top=startY;
+    if(rayTop)*rayTop=int64_t(top*4294967296.0);
+    alignas(16) float from[4]={float(x),float(top),float(z),0};
     alignas(16) float to[4]={float(x),oy,float(z),0};
     alignas(16) uint8_t hit[64]{};
     // Abort at an unavailable cell. The native query queues that terrain block for loading.

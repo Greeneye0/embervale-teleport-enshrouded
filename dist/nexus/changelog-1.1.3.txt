@@ -1,0 +1,3 @@
+1.1.3
+- Map teleport now works in the shroud, while falling and under water, where the game's own fast travel is blocked. It plays the usual teleport animation.
+- Fixed: a teleport could land you above the world's height limit, and the game then sent you back to your respawn altar. The ground height is now read twice before use, and a reading above the limit is checked again from just below it.

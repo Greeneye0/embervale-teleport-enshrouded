@@ -1,4 +1,4 @@
-EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.2
+EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.3
 ==========================================================================
 
 Open the world map, hold Shift and hold the left mouse button on any spot for one second.
@@ -34,7 +34,7 @@ The mod has to be on the server AND on the game of every player who wants to tel
        greeneye\map-teleport\...
 4. Start the server.
 5. Check it loaded: greeneye\loader.log in the server folder should contain
-   "Embervale Teleport 1.1.2: server companion loaded".
+   "Embervale Teleport 1.1.3: server companion loaded".
 Players: each player installs the mod on their own game as above. Players without the mod
 can still join and play; they just can't teleport, and see nothing from the mod.
 Settings: the server's own map-teleport.ini decides how teleports behave for everyone on
@@ -85,6 +85,8 @@ GOOD TO KNOW
   own dbgcore.dll.
 - Works next to other mods. Where another mod (for example Creative Mode) hooks the same
   game function, Embervale Teleport chains onto its hook instead of replacing it.
+- Works in the shroud, while falling and under water, where the game's own fast travel
+  is blocked.
 - Made for the current game version. After a game update the mod checks that it still
   recognises the game; if not, it switches itself off instead of risking a crash.
 - greeneye\map-teleport\map-teleport-history.txt is the mod's own small record. Leave it.
@@ -95,6 +97,13 @@ GOOD TO KNOW
 
 CHANGES
 -------
+1.1.3
+- Map teleport now works in the shroud, while falling and under water, where the
+  game's own fast travel is blocked. It plays the usual teleport animation.
+- Fixed: a teleport could land you above the world's height limit, and the game
+  then sent you back to your respawn altar. The ground height is now read twice
+  before use, and a reading above the limit is checked again from just below it.
+
 1.1.2
 - Runs on other builds of the game too (after a game patch, or copies whose exe
   differs from Steam's) when it recognises the game code; before, it switched

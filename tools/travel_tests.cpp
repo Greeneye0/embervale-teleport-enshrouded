@@ -32,6 +32,9 @@ bool Faulted(){return false;}
 namespace {
 using Next=bool(*)(void*,void*,size_t);
 uint8_t functions[3][10000]{};Next hooks[4]{};unsigned hookCount=0,cursor=0;bool yieldEntity=false;
+// The native travel gate: refuses (1) outside area modes 0/1.
+uint8_t* NativeGate(uint8_t* out,char mode,uint64_t){*out=mode!=0&&mode!=1;return out;}
+using GateFn=uint8_t*(*)(uint8_t*,char,uint64_t);GateFn gateHook{};
 uint8_t directQueue[0x40]{},directCommand[0xbc]{};unsigned directCount=0;bool directReady=false;
 void* QueueDirect(void* queue,void* buffer,uint8_t type,uint32_t size,uint32_t id){
     assert(queue==directQueue&&buffer==directQueue+0x10&&type==3&&size==0xbc&&id==1);
@@ -72,13 +75,16 @@ uint8_t* Find(const char* pattern,void*){
     if(!strcmp(pattern,entityPattern))return reinterpret_cast<uint8_t*>(Entity);
     if(!strcmp(pattern,dirtyPattern))return reinterpret_cast<uint8_t*>(Dirty);
     if(!strcmp(pattern,rayPattern))return reinterpret_cast<uint8_t*>(Ray);
+    if(strncmp(pattern,"C6 01 00",8)==0)return reinterpret_cast<uint8_t*>(NativeGate);
     if(strncmp(pattern,"40 55 53",8)==0)return functions[2]+100;
     if(strncmp(pattern,"40 55 56",8)==0)return functions[2]+200;
     if(strncmp(pattern,"48 8B C4",8)==0)return functions[2]+300;
     if(strncmp(pattern,"4C 8B DC",8)==0)return functions[2]+400;
     return nullptr;
 }
-void* Redirect(uint8_t*,void* detour){assert(hookCount<4);hooks[hookCount++]=reinterpret_cast<Next>(detour);return reinterpret_cast<void*>(Iterate);}
+void* Redirect(uint8_t* site,void* detour){
+    if(site==functions[0]+0xfb2){gateHook=reinterpret_cast<GateFn>(detour);return reinterpret_cast<void*>(NativeGate);}
+    assert(hookCount<4);hooks[hookCount++]=reinterpret_cast<Next>(detour);return reinterpret_cast<void*>(Iterate);}
 void* Hook(uint8_t* site,void* detour,size_t length,const uint8_t*,size_t){
     if(site==functions[2]+300){assert(length==19);boundsHook=reinterpret_cast<BoundsFn>(detour);return reinterpret_cast<void*>(SetBounds);}
     if(site==functions[2]+100){receiveHook=reinterpret_cast<void(*)(void*)>(detour);return reinterpret_cast<void*>(Receive);}
@@ -92,7 +98,8 @@ bool ObserveTest(void* ctx,void* desc,size_t n) {
 }
 void Read(const void* p,void* out,size_t n){memcpy(out,p,n);}
 void Log(const char*){}
-void SetupSites(){const uint8_t gate[]={0xb2,0x0b,0x48,0x8b,0xc8,0xe8,0,0,0,0,0x84,0xc0,0x0f,0x85};memcpy(functions[0]+0xe91,gate,sizeof gate);const size_t offsets[2][2]={{0x36,0x21f6},{0x31,0x7be}};for(unsigned i=0;i<2;++i)for(auto offset:offsets[i]){auto site=functions[i]+offset;site[0]=0xe8;Put(site,1,static_cast<int32_t>(functions[2]-(site+5)));}}
+void SetupSites(){const uint8_t gate[]={0xb2,0x0b,0x48,0x8b,0xc8,0xe8,0,0,0,0,0x84,0xc0,0x0f,0x85};memcpy(functions[0]+0xe91,gate,sizeof gate);const size_t offsets[2][2]={{0x36,0x21f6},{0x31,0x7be}};for(unsigned i=0;i<2;++i)for(auto offset:offsets[i]){auto site=functions[i]+offset;site[0]=0xe8;Put(site,1,static_cast<int32_t>(functions[2]-(site+5)));}
+    auto gateSite=functions[0]+0xfb2;gateSite[0]=0xe8;Put(gateSite,1,static_cast<int32_t>(reinterpret_cast<uint8_t*>(NativeGate)-(gateSite+5)));}
 }
 int main(int argc,char** argv){
     using namespace teleport;using namespace teleport::travel;
@@ -112,7 +119,7 @@ int main(int argc,char** argv){
     GreeneyeHost host{};host.size=sizeof host;host.apiVersion=2;host.modDir=directory.c_str();
     host.find=Find;host.read=Read;host.redirectCall=Redirect;host.hook=Hook;host.log=Log;
     host.enter=[](void*){return true;};host.leave=[](){};greeneye::UseHost(&host);
-    SetupSites();assert(Init(&host)&&hookCount==4);
+    SetupSites();assert(Init(&host)&&hookCount==4&&gateHook);
     uint8_t manager[0xc0]{};
     Destination box[2]={{0,0,0},{10240LL*4294967296LL,2560LL*4294967296LL,10240LL*4294967296LL}};
     Put(manager,0xb0,box);Put<uint64_t>(manager,0xb8,1);
@@ -189,12 +196,15 @@ int main(int argc,char** argv){
                 assert(Get<uint32_t>(directCommand,0xa4)==0&&Get<uint8_t>(directCommand,0xb4)==0&&Get<uint8_t>(directCommand,0xb5)==0);
                 memcpy(component,directCommand+0x6c,sizeof component);directReady=false;
             }
-            assert(ObserveTest(&context,applyDesc,sizeof applyDesc));
+            // Terrain-top moves wait one tick for the confirming ground reading.
+            if(!ObserveTest(&context,applyDesc,sizeof applyDesc)){cursor=0;assert(ObserveTest(&context,applyDesc,sizeof applyDesc));}
             if(succeeds)memcpy(&position,component,sizeof position);
             assert(!hooks[3](&context,applyDesc,sizeof applyDesc));
         };
         if(!restart){assert(!tick());if(remote)chat("/mt1 777 858993459200 3865470566400");else assert(Local(1,target));}
-        protection::observed=false;assert(!tick());
+        protection::observed=false;
+        if(!restart){assert(!tick());assert(!protection::Busy());} // first ground reading, confirmed next tick
+        assert(!tick());
         assert(protection::Busy()&&LocalStatus(1).protection&&LocalStatus(1).phase==NoticePhase::waiting);
         assert(!Prepare());Resume();
         protection::observed=true;
@@ -219,7 +229,7 @@ int main(int argc,char** argv){
                     cursor=0;yieldEntity=false;assert(!hooks[0](&context,playerDesc,sizeof playerDesc));
                     assert(!protection::Busy());
                     Put<uint32_t>(serverData.data(),0x1e0,1);SetClient(clientData.data());
-                    assert(tick());
+                    assert(!tick());assert(tick()); // the recovery confirms its ground reading first
                 }else {
                     assert(!tick(scenicMs)&&LocalStatus(1).phase==NoticePhase::problem);
                     assert(!tick(problemMs)&&LocalStatus(1).phase==NoticePhase::correction);
@@ -246,16 +256,22 @@ int main(int argc,char** argv){
         assert(Local(1,target));assert(SubmitLocal(1,target)==Submission::rejected);
         assert(Latest(1).outcome==Outcome::pending);
         Put<uint32_t>(input,0x174,77);Put<uint32_t>(input,0x17c,7);Put<uint32_t>(control,0x54,7);
+        uint8_t refusal=0;assert(*gateHook(&refusal,2,0)==1); // other travel keeps the game's restrictions
         cursor=0;yieldEntity=true;assert(hooks[0](&context,playerDesc,sizeof playerDesc));
         assert(Get<uint32_t>(input,0x174)==1&&Get<uint32_t>(input,0x17c)==8);
+        assert(*gateHook(&refusal,2,0)==0&&*gateHook(&refusal,0,0)==0); // the injected map teleport passes
         assert(Get<uint8_t>(input,0x178)==1); // native Normal spell-effect variant
         Put<uint32_t>(command,8,0x1cc90f15);Put<uint32_t>(control,0x54,8);
         assert(!hooks[1](&context,playerDesc,sizeof playerDesc));
         assert(Get<uint32_t>(input,0x174)==77&&Get<uint32_t>(input,0x17c)==7&&Get<uint32_t>(control,0x54)==7);
+        assert(*gateHook(&refusal,2,0)==1);
         memset(component,0,sizeof component);position={};
         rayComplete=0;cursor=0;assert(!ObserveTest(&context,applyDesc,sizeof applyDesc));
         assert(Latest(1).outcome==Outcome::pending&&position.y==0);
-        rayComplete=1;cursor=0;assert(ObserveTest(&context,applyDesc,sizeof applyDesc));
+        // The first complete reading waits one tick for its confirming second reading.
+        rayComplete=1;cursor=0;assert(!ObserveTest(&context,applyDesc,sizeof applyDesc));
+        assert(position.y==0&&Get<uint8_t>(component,0x48)==0);
+        cursor=0;assert(ObserveTest(&context,applyDesc,sizeof applyDesc));
         assert(Latest(1).outcome==(deluxe&&!known?Outcome::failed:Outcome::pending)); // writing target is not arrival
         if(nativeMoves&&(!deluxe||known))memcpy(&position,component,sizeof position);
         if(deluxe&&!known)assert(Get<uint8_t>(component,0x48)==1&&position.y==0);
@@ -307,6 +323,6 @@ int main(int argc,char** argv){
     assert(Get<uint8_t>(component,0x48)==1);assert(!hooks[3](&context,applyDesc,sizeof applyDesc));
     assert(Prepare());
     DeleteFileW(ini.c_str());DeleteFileW((directory+L"\\map-teleport-history.txt").c_str());RemoveDirectoryW(directory.c_str());
-    printf("PASS: simulated native travel (%s, bounds %s): input restoration, terrain deferral, explicit position-confirmed arrival and failure\n",deluxe?"deluxe":"normal",known?"known":"unavailable");
+    printf("PASS: simulated native travel (%s, bounds %s): input restoration, travel gate opened only for the injected action, terrain deferral, explicit position-confirmed arrival and failure\n",deluxe?"deluxe":"normal",known?"known":"unavailable");
     puts("PASS: simulated host/client status: own-account/nonce matching, spoof suppression, phase delivery, stale terminal updates, disconnect cancellation and unload guard");
 }

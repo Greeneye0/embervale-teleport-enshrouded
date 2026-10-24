@@ -31,4 +31,16 @@ inline bool HighDestination(WorldBounds bounds,Destination ground,Destination& o
     if(bounds.maximum.y-ground.y<=12*metre)return false;
     out=ground;out.y=bounds.maximum.y-4*metre;return true;
 }
+// Ground from the terrain ray must lie inside the out-of-bounds box, at least four metres
+// under its ceiling, and clearly below where the ray started: a hit at the start means a
+// freshly loaded cell answered before it held real terrain. Landing above the box sends the
+// player to their altar, so such a hit is rechecked instead of used.
+inline bool PlausibleGround(bool boundsKnown,const WorldBounds& bounds,Destination ground,int64_t rayTop) {
+    constexpr int64_t metre=4294967296LL;
+    if(rayTop&&ground.y>=rayTop-metre)return false;
+    if(boundsKnown&&(ground.y<=bounds.minimum.y||ground.y>=bounds.maximum.y-4*metre))return false;
+    return true;
+}
+// Two ground readings on consecutive ticks must agree within half a metre.
+inline bool SameGround(int64_t a,int64_t b){constexpr int64_t half=4294967296LL/2;return (a>b?a-b:b-a)<=half;}
 }

@@ -14,9 +14,9 @@
 #include <initializer_list>
 #include <utility>
 namespace {
-int rayCalls=0;uint8_t complete=1,hitFlag=1;float ground=123.25f;
+int rayCalls=0;uint8_t complete=1,hitFlag=1;float ground=123.25f,rayStart=256.25f;
 void* FakeRay(void* output,void*,const float* from,const float* to,const uint8_t* options) {
-    ++rayCalls;assert(from[1]==256.25f&&to[1]==0&&from[0]==200&&from[2]==900);
+    ++rayCalls;assert(from[1]==rayStart&&to[1]==0&&from[0]==200&&from[2]==900);
     assert(options[2]==1&&options[3]==1);
     auto p=static_cast<uint8_t*>(output);p[0x12]=complete;p[0x13]=hitFlag;
     memcpy(p+4,&ground,4);return p;
@@ -66,6 +66,11 @@ int main() {
  assert(TopSurface(FakeRay,terrain.data(),1,dest)==Surface::invalid);
  dest.x=1024LL*4294967296LL;assert(TopSurface(FakeRay,terrain.data(),0,dest)==Surface::invalid);
  assert(rayCalls==before);
+ // A recheck starts lower; a start outside the grid falls back to the grid top.
+ ground=123.25f;dest=p;int64_t top=0;assert(TopSurface(FakeRay,terrain.data(),0,dest,nullptr,&top)==Surface::ready&&top==int64_t(256.25*4294967296.0));
+ rayStart=200.f;assert(TopSurface(FakeRay,terrain.data(),0,dest,nullptr,&top,200.)==Surface::ready&&top==200LL*4294967296LL);
+ rayStart=256.25f;assert(TopSurface(FakeRay,terrain.data(),0,dest,nullptr,&top,9000.)==Surface::ready);
+ assert(TopSurface(FakeRay,terrain.data(),0,dest,nullptr,&top,-5.)==Surface::ready);
  assert(ArrivedAt(p,p));auto moved=p;moved.y+=4294967296LL;
  assert(!ArrivedAt(moved,p));moved=p;moved.x+=4294967;assert(ArrivedAt(moved,p));
  assert(!ArrivedAt({INT64_MIN,0,0},{INT64_MAX,0,0}));
@@ -176,6 +181,16 @@ int main() {
  assert(aerial.x==p.x&&aerial.z==p.z&&aerial.y==2556LL*4294967296LL);
  auto outside=p;outside.x=readBounds.maximum.x;assert(!HighDestination(readBounds,outside,aerial));
  outside=p;outside.y=2550LL*4294967296LL;assert(!HighDestination(readBounds,outside,aerial));
+ {   // Ground above the reset box, or at the ray start, is never used.
+     constexpr int64_t m=4294967296LL;Destination g=p;g.y=100*m;
+     assert(PlausibleGround(true,readBounds,g,256*m)&&PlausibleGround(false,readBounds,g,0));
+     g.y=2556*m;assert(!PlausibleGround(true,readBounds,g,0));
+     g.y=2555*m;assert(PlausibleGround(true,readBounds,g,0));
+     g.y=3000*m;assert(!PlausibleGround(true,readBounds,g,0)&&PlausibleGround(false,readBounds,g,0));
+     g.y=256*m-m/2;assert(!PlausibleGround(false,readBounds,g,256*m));
+     g.y=0;assert(!PlausibleGround(true,readBounds,g,0));
+     assert(SameGround(100*m,100*m+m/2)&&SameGround(100*m+m/2,100*m)&&!SameGround(100*m,101*m));
+ }
  Put<uint64_t>(boundsManager.data(),0xb8,0);assert(!ReadWorldBounds(boundsManager.data(),readBounds));
  std::wstring ini=std::wstring(filename)+L".ini";
  assert(WritePrivateProfileStringW(L"Teleport",L"DeluxeTeleports",L"true",ini.c_str()));
@@ -208,4 +223,5 @@ int main() {
  puts("PASS: all three prank scripts, protection/arrival acknowledgments, recovery at every phase, independent deluxe policy");
  puts("PASS: INI switches, persistent per-account history, interrupted/completed visits, corrupt history rejection");
  puts("PASS: scene-bound altitude selection, boundary rejection and insufficient headroom (native enforcement unverified)");
+ puts("PASS: ground above the world limit or at the ray start is rechecked; lower ray start; two-reading agreement");
 }
