@@ -50,7 +50,7 @@ On a dedicated server the mod has to be on the server [b]and[/b] on the game of 
 [*]Open the server folder, the one with [i]enshrouded_server.exe[/i]. In Steam: Library > Tools > Enshrouded Dedicated Server > right-click > Manage > Browse local files. With SteamCMD it's the folder you installed to; with a rented server, use the host's file manager or FTP.
 [*]Copy everything from the zip into that folder, the same way as for the game: [b]dbgcore.dll[/b] next to [i]enshrouded_server.exe[/i], and the [b]greeneye\map-teleport[/b] folder.
 [*]Start the server.
-[*]Check it loaded: [i]greeneye\loader.log[/i] in the server folder should contain [i]Embervale Teleport 1.1.4: server companion loaded[/i].
+[*]Check it loaded: [i]greeneye\loader.log[/i] in the server folder should contain [i]Embervale Teleport 1.1.5: server companion loaded[/i].
 [/list]
 
 [b]Players:[/b] each player installs the mod on their own game as described above. Players without the mod can still join and play; they just can't teleport, and they won't see anything from the mod.
@@ -99,6 +99,11 @@ If something doesn't work, please post this file with your report:
 [line]
 
 [size=4][b]Changelog[/b][/size]
+
+[b]1.1.5[/b]
+[list]
+[*]Fixed: on a dedicated server with text chat turned off, map teleport didn't work ("host did not answer" in the log). The mod's hidden messages now get through either way; player chat stays off. Thanks to Slayheim for the logs.
+[/list]
 
 [b]1.1.4[/b]
 [list]

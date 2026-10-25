@@ -1,0 +1,2 @@
+1.1.5
+- Fixed: on a dedicated server with text chat turned off, map teleport didn't work ("host did not answer" in the log). The mod's hidden messages now get through either way; player chat stays off. Thanks to Slayheim for the logs.

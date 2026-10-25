@@ -23,6 +23,8 @@ using DispatchFn=void(*)(void*,void*);
 using DrawFn=void(*)(void*,const float*,const uint32_t*,const uint64_t*);
 using ViewFn=void(*)(void*,void*,uint8_t);
 MapFn nextMap=nullptr; LoopFn nextLoop=nullptr; DispatchFn dispatch=nullptr;
+// Client flag: the server allows text chat (read from the chat command's own check; 0 = unknown).
+int32_t textChatAllowed=0;
 LoopFn nextPlay=nullptr;
 DrawFn draw=nullptr; ViewFn updateView=nullptr;
 void** root=nullptr;
@@ -52,7 +54,12 @@ bool Cursor(float& x,float& y) {
 }
 void SendLine(void* client,std::string_view text) {
     alignas(8) uint8_t command[0x410]{};command[0]=0x74;command[1]=teleport::kChatType;
-    memcpy(command+2,text.data(),text.size());at<uint16_t>(command,0x402)=uint16_t(text.size());dispatch(client,command);
+    memcpy(command+2,text.data(),text.size());at<uint16_t>(command,0x402)=uint16_t(text.size());
+    // The game sends chat only while the server allows text chat, or system lines (type 4).
+    // Hidden protocol lines must also reach servers with text chat off, so allow this one send.
+    if(!textChatAllowed){dispatch(client,command);return;}
+    auto& allowed=at<uint8_t>(client,size_t(textChatAllowed));auto saved=allowed;allowed=1;
+    dispatch(client,command);allowed=saved;
 }
 // A remote host is asked (twice at most) per world whether it runs the mod. Until it answers, the client
 // sends no protocol lines: on a host without the mod they would show up as player chat.
@@ -252,7 +259,7 @@ GREENEYE_MOD_START {
     if(!greeneye::ClaimProcess(L"MapTeleport",host)) return false;
     if(!teleport::protection::Init(host)){Log("Map Teleport: protection bindings unavailable; disabled");return false;}
     if(!teleport::travel::Init(host)) {Log("Map Teleport: host bindings unavailable; disabled");return false;}
-    if(serverSide) {Log("Embervale Teleport 1.1.4: server companion loaded");return true;}
+    if(serverSide) {Log("Embervale Teleport 1.1.5: server companion loaded");return true;}
     auto mapTail=host->find("48 8D AC 24 A0 F8 FF FF 48 81 EC 60 08 00 00 48 8B 05",nullptr);
     auto loop=host->find("40 53 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 48 8D 81 58 4F 03 00",nullptr);
     auto send=host->find("4C 8B DC 55 56 57 49 8D AB 18 FF FF FF",nullptr);
@@ -263,12 +270,15 @@ GREENEYE_MOD_START {
     int32_t displacement=0;host->read(mapTail+0x12,&displacement,4);
     root=reinterpret_cast<void**>(mapTail+0x16+displacement);
     if(!teleport::popup::Init(host,root)){Log("Map Teleport: native notice bindings unavailable");return false;}
+    // cmp byte [rdi+allowed],0 / jne / cmp byte [rdx+1],4 in the chat command (0x74).
+    if(auto check=host->find("80 BF ?? ?? ?? ?? 00 75 ?? 80 7A 01 04",nullptr))host->read(check+2,&textChatAllowed,4);
+    if(textChatAllowed<=0||textChatAllowed>0x800000){textChatAllowed=0;Log("Map Teleport: chat permission check not found; remote teleport needs text chat on the server");}
     dispatch=reinterpret_cast<DispatchFn>(send);draw=reinterpret_cast<DrawFn>(image);updateView=reinterpret_cast<ViewFn>(view);
     nextMap=reinterpret_cast<MapFn>(host->hook(mapTail-16,reinterpret_cast<void*>(MapHook),16,nullptr,0));
     nextLoop=reinterpret_cast<LoopFn>(host->hook(loop,reinterpret_cast<void*>(LoopHook),13,nullptr,0));
     nextPlay=reinterpret_cast<LoopFn>(host->hook(play,reinterpret_cast<void*>(PlayHook),18,nullptr,0));
     if(!nextMap||!nextLoop||!nextPlay) {paused=true;Log("Map Teleport: hook installation failed");return false;}
-    Log("Embervale Teleport 1.1.4: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
+    Log("Embervale Teleport 1.1.5: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
 }
 GREENEYE_MOD_HOT {static const GreeneyeHot api{sizeof(GreeneyeHot),Prepare,Ready,Resume};return &api;}
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {if(reason==DLL_PROCESS_ATTACH) DisableThreadLibraryCalls(instance);return TRUE;}
