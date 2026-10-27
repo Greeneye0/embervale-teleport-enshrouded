@@ -280,6 +280,19 @@ int main(int argc,char** argv){
         assert(result.destination.y==(deluxe&&known?2556LL*4294967296LL:int64_t(123.25*4294967296.0)));
         assert(result.destination.x==target.x&&result.destination.z==target.z);
     }
+    {   // A cast the player jumps out of: accepted, but its Teleport never reaches Apply.
+        assert(Local(1,target));
+        Put<uint32_t>(input,0x17c,7);Put<uint32_t>(control,0x54,7);
+        cursor=0;yieldEntity=true;assert(hooks[0](&context,playerDesc,sizeof playerDesc));
+        Put<uint32_t>(command,8,0x1cc90f15);Put<uint32_t>(control,0x54,8);
+        assert(!hooks[1](&context,playerDesc,sizeof playerDesc));
+        testNow+=6000;cursor=0;yieldEntity=true;assert(hooks[0](&context,playerDesc,sizeof playerDesc));assert(!hooks[1](&context,playerDesc,sizeof playerDesc));
+        assert(Latest(1).outcome==Outcome::pending&&SubmitLocal(1,target)==Submission::rejected);
+        testNow+=1000;cursor=0;yieldEntity=true;assert(hooks[0](&context,playerDesc,sizeof playerDesc));assert(!hooks[1](&context,playerDesc,sizeof playerDesc));
+        assert(Latest(1).outcome==Outcome::cancelled&&LocalStatus(1).phase==NoticePhase::cancelled);
+        assert(Local(1,target)); // the player can teleport again
+        testNow+=31000;cursor=0;yieldEntity=true;assert(hooks[0](&context,playerDesc,sizeof playerDesc));assert(!hooks[1](&context,playerDesc,sizeof playerDesc));
+    }
     assert(Prepare());assert(!Local(1,target));Resume();
     // Exercise the actual chat hook, including account/nonce isolation and host
     // suppression of packets pretending to be host responses.
@@ -323,6 +336,6 @@ int main(int argc,char** argv){
     assert(Get<uint8_t>(component,0x48)==1);assert(!hooks[3](&context,applyDesc,sizeof applyDesc));
     assert(Prepare());
     DeleteFileW(ini.c_str());DeleteFileW((directory+L"\\map-teleport-history.txt").c_str());RemoveDirectoryW(directory.c_str());
-    printf("PASS: simulated native travel (%s, bounds %s): input restoration, travel gate opened only for the injected action, terrain deferral, explicit position-confirmed arrival and failure\n",deluxe?"deluxe":"normal",known?"known":"unavailable");
+    printf("PASS: simulated native travel (%s, bounds %s): input restoration, travel gate opened only for the injected action, interrupted casts released, terrain deferral, explicit position-confirmed arrival and failure\n",deluxe?"deluxe":"normal",known?"known":"unavailable");
     puts("PASS: simulated host/client status: own-account/nonce matching, spoof suppression, phase delivery, stale terminal updates, disconnect cancellation and unload guard");
 }

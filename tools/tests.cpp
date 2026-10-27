@@ -30,8 +30,9 @@ int main() {
  Status status{};assert(ParseStatus("/mts1 123 1 2 3",status));
  assert(status.phase==NoticePhase::countdown&&status.scenario==2&&status.countdown==3);
  assert(MatchesStatus(status,123,456,456)&&!MatchesStatus(status,124,456,456)&&!MatchesStatus(status,123,789,456)&&!MatchesStatus(status,123,0,0));
- for(auto invalid:{"/mts1 0 0 0 0","/mts1 123 10 0 0","/mts1 123 3 3 0","/mts1 123 1 0 0","/mts1 123 0 0 1","/mts1 123 1 0 4","/mts1 123 8 0 0 extra"})assert(!ParseStatus(invalid,status));
+ for(auto invalid:{"/mts1 0 0 0 0","/mts1 123 11 0 0","/mts1 123 3 3 0","/mts1 123 1 0 0","/mts1 123 0 0 1","/mts1 123 1 0 4","/mts1 123 8 0 0 extra"})assert(!ParseStatus(invalid,status));
  assert(ParseStatus("/mts1 123 8 0 0",status)&&Finished(status));
+ assert(ParseStatus("/mts1 123 10 0 0",status)&&status.phase==NoticePhase::cancelled&&Finished(status));
  Destination p{};
  assert(Convert(500,300,100,100,2,1000,1000,p));
  assert(p.x==int64_t(200)*4294967296LL&&p.z==int64_t(900)*4294967296LL&&p.y==0);

@@ -1,4 +1,4 @@
-EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.5
+EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.6
 ==========================================================================
 
 Open the world map, hold Shift and hold the left mouse button on any spot for one second.
@@ -34,7 +34,7 @@ The mod has to be on the server AND on the game of every player who wants to tel
        greeneye\map-teleport\...
 4. Start the server.
 5. Check it loaded: greeneye\loader.log in the server folder should contain
-   "Embervale Teleport 1.1.5: server companion loaded".
+   "Embervale Teleport 1.1.6: server companion loaded".
 Players: each player installs the mod on their own game as above. Players without the mod
 can still join and play; they just can't teleport, and see nothing from the mod.
 Settings: the server's own map-teleport.ini decides how teleports behave for everyone on
@@ -97,6 +97,11 @@ GOOD TO KNOW
 
 CHANGES
 -------
+1.1.6
+- Fixed: jumping or dodging out of the teleport cast left map teleport stuck on
+  "A teleport is already in progress." The teleport is now released after a few
+  seconds with a "Teleport cancelled." notice, in every language.
+
 1.1.5
 - Fixed: on a dedicated server with text chat turned off, map teleport didn't work
   ("host did not answer" in the log). The mod's hidden messages now get through

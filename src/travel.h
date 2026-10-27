@@ -3,7 +3,7 @@
 #include "status.h"
 #include "greeneye.h"
 namespace teleport::travel {
-enum class Outcome { none, pending, arrived, failed };
+enum class Outcome { none, pending, arrived, failed, cancelled };
 struct Result {uint32_t entity{};uint64_t nonce{};Destination destination{};Outcome outcome{};uint64_t account{};};
 bool Init(const GreeneyeHost* host);
 Result Latest(uint32_t entity);

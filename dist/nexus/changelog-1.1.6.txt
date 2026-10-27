@@ -1,0 +1,2 @@
+1.1.6
+- Fixed: jumping or dodging out of the teleport cast left map teleport stuck on "A teleport is already in progress." The teleport is now released after a few seconds with a "Teleport cancelled." notice, in every language.

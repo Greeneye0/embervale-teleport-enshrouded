@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <atomic>
 #include "greeneye.h"
 #include "countdown.h"
 #include "travel.h"
@@ -123,6 +124,18 @@ void MapHook(void* widget,uint8_t* state) {
     greeneye::Lease lease;
     if(!lease || !SafeMap(widget,state)) nextMap(widget,state);
 }
+void Dispatch(void* client,teleport::Destination target);
+// MapTeleportRequest (dev tools: the MCP bridge) leaves a target here; the command loop sends it next frame.
+std::atomic<bool> apiPending{false};
+teleport::Destination apiTarget{};
+void ApiFrame(void* app) {
+    if(!apiPending.load(std::memory_order_acquire)) return;
+    apiPending.store(false,std::memory_order_relaxed);
+    auto* client=GameClient(app);
+    if(paused||broken||!client||!at<void*>(client,0x47d4e0)) {Log("Map Teleport: requested teleport dropped (no world)");return;}
+    Log("Map Teleport: teleport requested by a dev tool");
+    Dispatch(client,apiTarget);
+}
 void EndFrame(void* app) {
     if(paused||broken) {Cancel();return;}
     float x,y;
@@ -133,8 +146,12 @@ void EndFrame(void* app) {
     auto* client=GameClient(app);
     if(!client||at<void*>(client,0x47d4e0)!=world) {Cancel("dispatch world mismatch");return;}
     auto target=countdown.target;
-    teleport::travel::SetClient(client);
     Cancel(); // one dispatch per click, including across subsequent frames
+    Dispatch(client,target);
+}
+// Queues the local player's teleport to target, as a finished map hold does.
+void Dispatch(void* client,teleport::Destination target) {
+    teleport::travel::SetClient(client);
     uint32_t entity=(at<uint32_t>(client,0x466b44)&0x3f)+1;
     if(watching.nonce){teleport::popup::Show(teleport::popup::Say(teleport::text::Title),teleport::popup::Say(teleport::text::InProgress),2000);return;}
     uint64_t now=GetTickCount64();
@@ -217,6 +234,7 @@ void StatusFrame(void* app) {
             case NoticePhase::returning:break; // Keep the preceding text; do not restart its typewriter.
             case NoticePhase::complete:message=popup::Say(watching.prank?text::PrankThankYou:text::ThankYou);break;
             case NoticePhase::failed:message=popup::Say(text::Failed);break;
+            case NoticePhase::cancelled:message=popup::Say(text::Cancelled);break;
             case NoticePhase::ascending:popup::Clear();break;
             default:break;
         }
@@ -230,7 +248,7 @@ void StatusFrame(void* app) {
     if(Finished(status)){watching={};travel::TrackRemote(0,LocalAccount());}
 }
 void SafeStatus(void* app){__try{StatusFrame(app);}__except(EXCEPTION_EXECUTE_HANDLER){watching={};Log("Map Teleport: notice tracking failed; active protection retained");}}
-void SafeEnd(void* app) {__try {EndFrame(app);} __except(EXCEPTION_EXECUTE_HANDLER) {Cancel();broken=true;Log("Map Teleport: dispatch disabled after invalid game state");}}
+void SafeEnd(void* app) {__try {EndFrame(app);ApiFrame(app);} __except(EXCEPTION_EXECUTE_HANDLER) {Cancel();broken=true;Log("Map Teleport: dispatch disabled after invalid game state");}}
 void LoopHook(void* app) {
     greeneye::Lease lease;
     if(!lease) {nextLoop(app);return;}
@@ -259,7 +277,7 @@ GREENEYE_MOD_START {
     if(!greeneye::ClaimProcess(L"MapTeleport",host)) return false;
     if(!teleport::protection::Init(host)){Log("Map Teleport: protection bindings unavailable; disabled");return false;}
     if(!teleport::travel::Init(host)) {Log("Map Teleport: host bindings unavailable; disabled");return false;}
-    if(serverSide) {Log("Embervale Teleport 1.1.5: server companion loaded");return true;}
+    if(serverSide) {Log("Embervale Teleport 1.1.6: server companion loaded");return true;}
     auto mapTail=host->find("48 8D AC 24 A0 F8 FF FF 48 81 EC 60 08 00 00 48 8B 05",nullptr);
     auto loop=host->find("40 53 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 48 8D 81 58 4F 03 00",nullptr);
     auto send=host->find("4C 8B DC 55 56 57 49 8D AB 18 FF FF FF",nullptr);
@@ -278,7 +296,14 @@ GREENEYE_MOD_START {
     nextLoop=reinterpret_cast<LoopFn>(host->hook(loop,reinterpret_cast<void*>(LoopHook),13,nullptr,0));
     nextPlay=reinterpret_cast<LoopFn>(host->hook(play,reinterpret_cast<void*>(PlayHook),18,nullptr,0));
     if(!nextMap||!nextLoop||!nextPlay) {paused=true;Log("Map Teleport: hook installation failed");return false;}
-    Log("Embervale Teleport 1.1.5: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
+    Log("Embervale Teleport 1.1.6: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
+}
+// Dev tools: teleport the local player to world x / z (metres), landing like a map hold. 1 = queued.
+extern "C" __declspec(dllexport) int MapTeleportRequest(double x,double z) {
+    if(!(x>=0&&x<=10240&&z>=0&&z<=10240)) return 0;
+    apiTarget={int64_t(x*4294967296.0),0,int64_t(z*4294967296.0)};
+    apiPending.store(true,std::memory_order_release);
+    return 1;
 }
 GREENEYE_MOD_HOT {static const GreeneyeHot api{sizeof(GreeneyeHot),Prepare,Ready,Resume};return &api;}
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {if(reason==DLL_PROCESS_ATTACH) DisableThreadLibraryCalls(instance);return TRUE;}

@@ -54,6 +54,7 @@ struct Pending {
     bool deluxe{};
     Journey trip{};bool journaled{},clientReady{},clientRestored{},recovery{};
     uint64_t retryAfter{};
+    uint64_t armedAt{};bool applied{}; // when the game accepted the cast; whether its Teleport arrived
     int64_t groundY{};bool groundRead{},groundLogged{},pitChecked{};uint64_t pitSince{}; // ground confirmation, see Ground()
     uint8_t transform[56]{};bool haveTransform=false;
 };
@@ -102,6 +103,9 @@ uint64_t AccountOf(uint32_t id) {
     return 0;
 }
 bool Remote(const Pending& p){return p.account&&p.account!=localAccount.load();}
+NoticePhase PhaseOf(Outcome o) {
+    return o==Outcome::arrived?NoticePhase::complete:o==Outcome::pending?NoticePhase::waiting:o==Outcome::cancelled?NoticePhase::cancelled:NoticePhase::failed;
+}
 Status Describe(const Pending& p) {
     Status status{p.nonce};
     if(p.journaled||p.recovery) {
@@ -250,7 +254,7 @@ void FinishInjection() {
     bool accepted=at<uint32_t>(saved.command,8)==0x1cc90f15;
     std::lock_guard guard(lock);
     for(auto& p:requests)if(p.entity==saved.entity&&p.storage==saved.storage&&p.stage==Stage::injecting) {
-        if(accepted)p.stage=Stage::armed;else Recover(p);
+        if(accepted){p.stage=Stage::armed;p.armedAt=GetTickCount64();}else Recover(p);
         p.expires=GetTickCount64()+30000;
         if(saved.refusal) {
             std::string why;
@@ -312,6 +316,14 @@ void Player(void* ctx,void* descriptors) {
             if(p.stage==Stage::armed||p.stage==Stage::cancelling){p.stage=Stage::cancelling;if(p.journaled)protection::Disable(p.storage,p.entity);}
             else Retire(p);
             continue;
+        }
+        // The cast takes about four seconds before the game applies its Teleport. Jumping or
+        // dodging out of the cast cancels it, and no Teleport ever arrives: let the player go after
+        // seven seconds, leaving a slow cast (a busy server) almost three seconds to spare.
+        if((p.stage==Stage::armed||p.stage==Stage::cancelling)&&!p.journaled&&!p.applied&&p.armedAt&&now-p.armedAt>=7000) {
+            Log("Map Teleport: cast interrupted before the teleport; request dropped");
+            if(p.stage==Stage::armed)Record(p,Outcome::cancelled);
+            p={};continue;
         }
         if((p.journaled&&p.stage==Stage::journey)||p.recovery)p.expires=now+30000;
         if(p.expires<=now) {
@@ -409,6 +421,7 @@ bool Apply(void* ctx,void* descriptors) {
         void* wrapper=static_cast<uint8_t*>(descriptors)+0x100;
         void* component=at<void*>(wrapper,0);
         if(!component||at<uint8_t>(component,0x48))return true;
+        p.applied=true;
         uint32_t relative=at<uint32_t>(component,0x38);
         if(relative&&relative!=id){Recover(p);return true;}
         if(p.stage==Stage::cancelling||p.expires<=GetTickCount64()||(p.account&&SenderEntity(p.account)!=id)) {
@@ -547,8 +560,7 @@ int HostChat(void* store,uint8_t type,uint64_t* text,uint32_t senderHandle,uint6
             reply=Describe(p);nonce=p.nonce;break;
         }
         for(auto result:results)if(id&&result.entity==id&&result.account==account&&result.nonce==nonce) {
-            phase=result.outcome==Outcome::arrived?NoticePhase::complete:
-                result.outcome==Outcome::pending?NoticePhase::waiting:NoticePhase::failed;break;
+            phase=PhaseOf(result.outcome);break;
         }
     } else if(line.starts_with("/mt1 ")) {
         Request r;if(!ParseRequest(line,r))return 2;
@@ -619,7 +631,7 @@ void SetClient(void* c){
 Result Latest(uint32_t entity){std::lock_guard guard(lock);for(auto result:results)if(result.entity==entity)return result;return {};}
 void TrackRemote(uint64_t nonce,uint64_t account){std::lock_guard guard(lock);remoteStatus={nonce};remoteAccount=account;if(!predictedStorage)predictionAck=0;}
 Status RemoteStatus(){std::lock_guard guard(lock);return remoteStatus;}
-Status LocalStatus(uint32_t entity){std::lock_guard guard(lock);for(auto& p:requests)if(p.stage!=Stage::none&&p.entity==entity)return Describe(p);for(auto r:results)if(r.entity==entity)return {r.nonce,r.outcome==Outcome::arrived?NoticePhase::complete:r.outcome==Outcome::pending?NoticePhase::waiting:NoticePhase::failed};return {};}
+Status LocalStatus(uint32_t entity){std::lock_guard guard(lock);for(auto& p:requests)if(p.stage!=Stage::none&&p.entity==entity)return Describe(p);for(auto r:results)if(r.entity==entity)return {r.nonce,PhaseOf(r.outcome)};return {};}
 unsigned ClientProtectionAck(){std::lock_guard guard(lock);return predictionAck;}
 bool Prepare() {
     paused=true;std::lock_guard guard(lock);

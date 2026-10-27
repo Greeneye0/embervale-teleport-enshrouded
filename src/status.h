@@ -4,7 +4,7 @@
 #include <string_view>
 #include "countdown.h"
 namespace teleport {
-enum class NoticePhase : unsigned { waiting,countdown,ascending,scenic,problem,correction,returning,restoring,complete,failed };
+enum class NoticePhase : unsigned { waiting,countdown,ascending,scenic,problem,correction,returning,restoring,complete,failed,cancelled };
 struct Status {uint64_t nonce{};NoticePhase phase{};unsigned scenario{},countdown{};bool protection{};Destination ground{};};
 inline bool ParsePoll(std::string_view line,uint64_t& nonce) {
     if(!line.starts_with("/mtp1 ")||line.size()>32)return false;
@@ -22,7 +22,7 @@ inline bool ParseStatus(std::string_view line,Status& out) {
         if(i==3){line.remove_prefix(size_t(r.ptr-line.data()));}
         else {if(r.ptr==end||*r.ptr!=' ')return false;line.remove_prefix(size_t(r.ptr-line.data())+1);}
     }
-    if(!fields[0]||fields[1]>unsigned(NoticePhase::failed)||fields[2]>2||fields[3]>3)return false;
+    if(!fields[0]||fields[1]>unsigned(NoticePhase::cancelled)||fields[2]>2||fields[3]>3)return false;
     if((fields[1]==unsigned(NoticePhase::countdown))!=(fields[3]>0))return false;
     Status value{fields[0],NoticePhase(fields[1]),unsigned(fields[2]),unsigned(fields[3])};
     if(!line.empty()) {
@@ -40,7 +40,7 @@ inline bool ParseStatus(std::string_view line,Status& out) {
     }
     out=value;return true;
 }
-inline bool Finished(Status s){return s.phase==NoticePhase::complete||s.phase==NoticePhase::failed;}
+inline bool Finished(Status s){return s.phase==NoticePhase::complete||s.phase==NoticePhase::failed||s.phase==NoticePhase::cancelled;}
 // A public chat packet is not a status merely because it starts with /mts1.
 // Only the local client's chat store and its own account/active nonce qualify.
 inline bool MatchesStatus(Status s,uint64_t active,uint64_t sender,uint64_t localAccount) {
