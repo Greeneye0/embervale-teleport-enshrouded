@@ -598,13 +598,13 @@ bool Init(const GreeneyeHost* host) {
     queueCommand=reinterpret_cast<QueueCommand>(host->find(native::queueTeleportPattern,nullptr));
     notifyTeleport=reinterpret_cast<NotifyTeleport>(host->find(native::notifyTeleportPattern,nullptr));
     if(!queueCommand||!notifyTeleport||!p||!a||!n||!entityOf||!dirty||!ray||!r||!chat||!limits||!ground)return false;
-    if(!CallMatches(host,p+0x36,n)||!CallMatches(host,p+0x21f6,n)||!CallMatches(host,a+0x31,n)||!CallMatches(host,a+0x7be,n))return false;
+    if(!CallMatches(host,p+0x35,n)||!CallMatches(host,p+0x11c6,n)||!CallMatches(host,a+0x31,n)||!CallMatches(host,a+0x7be,n))return false;
     // Optional: without the gate the game's own travel restrictions still apply.
     auto g=host->find("C6 01 00 49 0F BA E0 0E 72 ?? 32 C0 84 D2 74 ?? 80 FA 01 74 ?? C6 01 01 B0 01 49 0F BA E0 2C",nullptr);
-    if(g&&p&&CallMatches(host,p+0xfb2,g))gate=reinterpret_cast<Gate>(host->redirectCall(p+0xfb2,reinterpret_cast<void*>(GateHook)));
+    if(g&&p&&CallMatches(host,p+0x10b8,g))gate=reinterpret_cast<Gate>(host->redirectCall(p+0x10b8,reinterpret_cast<void*>(GateHook)));
     if(!gate)Log("Map Teleport: travel gate not found; the game's travel restrictions apply to map teleport");
-    playerFirst=reinterpret_cast<Next>(host->redirectCall(p+0x36,reinterpret_cast<void*>(PlayerFirst)));
-    playerMore=reinterpret_cast<Next>(host->redirectCall(p+0x21f6,reinterpret_cast<void*>(PlayerMore)));
+    playerFirst=reinterpret_cast<Next>(host->redirectCall(p+0x35,reinterpret_cast<void*>(PlayerFirst)));
+    playerMore=reinterpret_cast<Next>(host->redirectCall(p+0x11c6,reinterpret_cast<void*>(PlayerMore)));
     applyFirst=reinterpret_cast<Next>(host->redirectCall(a+0x31,reinterpret_cast<void*>(ApplyFirst)));
     applyMore=reinterpret_cast<Next>(host->redirectCall(a+0x7be,reinterpret_cast<void*>(ApplyMore)));
     receive=reinterpret_cast<Receive>(host->hook(r,reinterpret_cast<void*>(ReceiveHook),13,nullptr,0));
