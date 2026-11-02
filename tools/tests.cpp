@@ -113,7 +113,11 @@ int main() {
          {"Legendär",text::Lang::de},{"Legendario",text::Lang::es},{"レジェンダリー",text::Lang::ja},
          {"전설",text::Lang::ko},{"Legendarny",text::Lang::pl},{"Lendário",text::Lang::pt},
          {"Легендарный",text::Lang::ru},{"传说",text::Lang::zhHans},{"傳說",text::Lang::zhHant},
-         {"Efsanevi",text::Lang::tr},{"Легендарний",text::Lang::uk},{"ตำนาน",text::Lang::th}}) {
+         {"Efsanevi",text::Lang::tr},{"Легендарний",text::Lang::uk},{"ตำนาน",text::Lang::th},
+         // Russian in any form the game may use, Ukrainian in its other forms.
+         {"Легендарное",text::Lang::ru},{"Легендарная",text::Lang::ru},{"Легендарные",text::Lang::ru},
+         {"ЛЕГЕНДАРНОЕ",text::Lang::ru},{"Легендарна",text::Lang::uk},{"Легендарне",text::Lang::uk},
+         {"Легендарні",text::Lang::uk}}) {
      text::Lang found=text::Lang::count;assert(text::Detect(word,found)&&found==lang);
  }
  {text::Lang kept=text::Lang::de;assert(!text::Detect("",kept)&&!text::Detect("???",kept)&&kept==text::Lang::de);}

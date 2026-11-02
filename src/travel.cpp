@@ -4,6 +4,7 @@
 #include "travel.h"
 #include "protocol.h"
 #include "terrain.h"
+#include "terrain_probe.h"
 #include "arrival.h"
 #include "altitude.h"
 #include "settings.h"
@@ -68,6 +69,10 @@ uint64_t predictedLandingSince{};
 struct World {void* storage{};void* terrain{};uint64_t seen{};uint8_t realm{};};
 World hostWorld{};
 World terrainSources[16]{};
+// Separate from authoritative teleport state: native material queries also
+// expose client-world terrain on dedicated-server clients. Only a matching,
+// recently observed registry may use these samples.
+World probeTerrainSources[16]{};
 struct Injection {void* input{};void* control{};void* command{};void* storage{};uint32_t entity{},consumed{};uint8_t saved[12]{};uint8_t refusal{},mode{};};
 thread_local Injection injection;
 using QueueCommand=void*(*)(void*,void*,uint8_t,uint32_t,uint32_t);
@@ -228,8 +233,17 @@ void CaptureTerrain(void* descriptors) {
     for(auto& saved:terrainSources)if(saved.storage==source.storage&&saved.realm==source.realm){saved=source;return;}
     for(size_t i=0;i<std::size(terrainSources);++i){auto& saved=terrainSources[i];if(!saved.storage||source.seen-saved.seen>=2000){bool fresh=!saved.storage&&source.storage;saved=source;if(fresh){char text[96];sprintf_s(text,"Map Teleport: terrain source %zu registered",i);Log(text);}return;}}
 }
+void CaptureProbeTerrain(void* descriptors) {
+    if(!descriptors)return;
+    auto ctx=at<void*>(descriptors,0);if(!ctx||!at<void*>(ctx,0))return;
+    World source{Storage(ctx),at<void*>(descriptors,0xf8),GetTickCount64(),at<uint8_t>(at<void*>(ctx,0),0xbb)};
+    if(!source.storage||!source.terrain)return;
+    std::lock_guard guard(lock);
+    for(auto& saved:probeTerrainSources)if(saved.storage==source.storage&&saved.realm==source.realm){saved=source;return;}
+    for(auto& saved:probeTerrainSources)if(!saved.storage||source.seen-saved.seen>2000){saved=source;return;}
+}
 void SafeCaptureTerrain(void* descriptors) {
-    __try{CaptureTerrain(descriptors);}__except(EXCEPTION_EXECUTE_HANDLER){Log("Map Teleport: terrain capture unavailable");}
+    __try{CaptureProbeTerrain(descriptors);CaptureTerrain(descriptors);}__except(EXCEPTION_EXECUTE_HANDLER){Log("Map Teleport: terrain capture unavailable");}
 }
 void* GroundHook(void* result,void* material,void* descriptors) {
     greeneye::Lease lease;if(lease)SafeCaptureTerrain(descriptors);
@@ -598,13 +612,13 @@ bool Init(const GreeneyeHost* host) {
     queueCommand=reinterpret_cast<QueueCommand>(host->find(native::queueTeleportPattern,nullptr));
     notifyTeleport=reinterpret_cast<NotifyTeleport>(host->find(native::notifyTeleportPattern,nullptr));
     if(!queueCommand||!notifyTeleport||!p||!a||!n||!entityOf||!dirty||!ray||!r||!chat||!limits||!ground)return false;
-    if(!CallMatches(host,p+0x36,n)||!CallMatches(host,p+0x21f6,n)||!CallMatches(host,a+0x31,n)||!CallMatches(host,a+0x7be,n))return false;
+    if(!CallMatches(host,p+0x35,n)||!CallMatches(host,p+0x11c6,n)||!CallMatches(host,a+0x31,n)||!CallMatches(host,a+0x7be,n))return false;
     // Optional: without the gate the game's own travel restrictions still apply.
     auto g=host->find("C6 01 00 49 0F BA E0 0E 72 ?? 32 C0 84 D2 74 ?? 80 FA 01 74 ?? C6 01 01 B0 01 49 0F BA E0 2C",nullptr);
-    if(g&&p&&CallMatches(host,p+0xfb2,g))gate=reinterpret_cast<Gate>(host->redirectCall(p+0xfb2,reinterpret_cast<void*>(GateHook)));
+    if(g&&p&&CallMatches(host,p+0x10b8,g))gate=reinterpret_cast<Gate>(host->redirectCall(p+0x10b8,reinterpret_cast<void*>(GateHook)));
     if(!gate)Log("Map Teleport: travel gate not found; the game's travel restrictions apply to map teleport");
-    playerFirst=reinterpret_cast<Next>(host->redirectCall(p+0x36,reinterpret_cast<void*>(PlayerFirst)));
-    playerMore=reinterpret_cast<Next>(host->redirectCall(p+0x21f6,reinterpret_cast<void*>(PlayerMore)));
+    playerFirst=reinterpret_cast<Next>(host->redirectCall(p+0x35,reinterpret_cast<void*>(PlayerFirst)));
+    playerMore=reinterpret_cast<Next>(host->redirectCall(p+0x11c6,reinterpret_cast<void*>(PlayerMore)));
     applyFirst=reinterpret_cast<Next>(host->redirectCall(a+0x31,reinterpret_cast<void*>(ApplyFirst)));
     applyMore=reinterpret_cast<Next>(host->redirectCall(a+0x7be,reinterpret_cast<void*>(ApplyMore)));
     receive=reinterpret_cast<Receive>(host->hook(r,reinterpret_cast<void*>(ReceiveHook),13,nullptr,0));
@@ -621,12 +635,45 @@ Submission SubmitLocal(uint32_t entity,Destination position) {
     return Queue(entity,localAccount.load(),{GetTickCount64(),position})?Submission::queued:Submission::rejected;
 }
 bool HostsWorld(){std::lock_guard guard(lock);return hostWorld.storage&&GetTickCount64()-hostWorld.seen<=2000;}
+int ProbeTerrain(TerrainProbe* probe) {
+    if(!probe||probe->size!=sizeof(TerrainProbe)||probe->version!=1)return 0;
+    probe->state=TerrainProbeState::unavailable;probe->height=0;probe->sourceAgeMs=0;probe->realm=0;
+    strcpy_s(probe->reason,"no fresh native terrain source for this registry");
+    if(!probe->registry||!std::isfinite(probe->x)||!std::isfinite(probe->z)||!std::isfinite(probe->startY)||
+       probe->x<3724.5||probe->x>3764.5||probe->z<1407.5||probe->z>1447.5||probe->startY<824||probe->startY>861) {
+        probe->state=TerrainProbeState::invalid;strcpy_s(probe->reason,"probe outside authorized test-base limits");return 1;
+    }
+    std::lock_guard guard(lock);
+    if(paused||faulted||!ray){strcpy_s(probe->reason,"terrain module is not ready");return 1;}
+    const uint64_t now=GetTickCount64();World source{};unsigned matches=0;
+    for(const auto& saved:probeTerrainSources)if(saved.storage==probe->registry&&saved.terrain&&now>=saved.seen&&now-saved.seen<=2000){source=saved;++matches;}
+    // A caller without a realm identifier must never silently choose one.
+    if(matches!=1){if(matches>1)strcpy_s(probe->reason,"multiple terrain realms match this registry");return 1;}
+    probe->realm=source.realm;probe->sourceAgeMs=now-source.seen;
+    Destination point{int64_t(probe->x*4294967296.0),0,int64_t(probe->z*4294967296.0)};
+    const char* reason=nullptr;int64_t top=0;
+    auto surface=TopSurface(ray,source.terrain,source.realm,point,&reason,&top,probe->startY);
+    if(reason)strcpy_s(probe->reason,reason);
+    if(surface==Surface::loading){probe->state=TerrainProbeState::loading;return 1;}
+    if(surface!=Surface::ready||!PlausibleGround(boundsKnown,bounds,point,top)) {
+        probe->state=TerrainProbeState::invalid;
+        if(surface==Surface::ready)strcpy_s(probe->reason,"terrain hit is at ray start or outside world height limits");
+        return 1;
+    }
+    probe->state=TerrainProbeState::ready;probe->height=Metres(point.y);return 1;
+}
+int SafeProbeTerrain(TerrainProbe* probe) {
+    __try{return ProbeTerrain(probe);}__except(EXCEPTION_EXECUTE_HANDLER){
+        // This query is diagnostic; it must not cancel or fault teleport state.
+        return 0;
+    }
+}
 bool HostAnswered(){return hostAnswered.load();}
 void SetClient(void* c){
     auto previous=client.exchange(c);
     if(previous!=c)hostAnswered=false;
     if(c){localEntity=(at<uint32_t>(c,0x466b44)&0x3f)+1;if(previous!=c){localAccount=LocalAccount();SafeBounds(at<void*>(c,0x4671d0));std::lock_guard guard(lock);remoteAccount=localAccount;}}
-    else{localEntity=0;localAccount=0;std::lock_guard guard(lock);if(predictedStorage&&protection::Disable(predictedStorage,predictedEntity)){predictedStorage=nullptr;predictionAck=0;}remoteStatus={};}
+    else{localEntity=0;localAccount=0;std::lock_guard guard(lock);for(auto& source:probeTerrainSources)source={};if(predictedStorage&&protection::Disable(predictedStorage,predictedEntity)){predictedStorage=nullptr;predictionAck=0;}remoteStatus={};}
 }
 Result Latest(uint32_t entity){std::lock_guard guard(lock);for(auto result:results)if(result.entity==entity)return result;return {};}
 void TrackRemote(uint64_t nonce,uint64_t account){std::lock_guard guard(lock);remoteStatus={nonce};remoteAccount=account;if(!predictedStorage)predictionAck=0;}
@@ -641,4 +688,9 @@ bool Prepare() {
     return !protection::Busy();
 }
 void Resume(){paused=false;}
+}
+
+extern "C" __declspec(dllexport) int MapTeleportTerrainProbe(teleport::TerrainProbe* probe) {
+    greeneye::Lease lease;if(!lease)return 0;
+    return teleport::travel::SafeProbeTerrain(probe);
 }

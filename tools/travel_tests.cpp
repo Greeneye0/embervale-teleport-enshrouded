@@ -7,12 +7,15 @@
 #include "../src/protection.h"
 #include "../src/history.h"
 #include "../src/protocol.h"
+#include "../src/terrain_probe.h"
 #include <cassert>
 #include <cstring>
 #include <cstdio>
 #include <vector>
 #include <string>
 #include <map>
+
+extern "C" int MapTeleportTerrainProbe(teleport::TerrainProbe* probe);
 
 uint64_t testNow=100000,testAccount=0;
 namespace teleport {uint64_t TestAccount(){return testAccount;}}
@@ -55,12 +58,13 @@ uint8_t query[0x140]{},navigation[0x1470]{},grids[0x58]{};uint8_t storage[0x500]
 teleport::Destination position{};
 std::vector<uint8_t> terrain(0x1c08),realm(0x3870),grid(0x180);
 uint8_t rayComplete=1,rayHit=1;
+float rayHeight=123.25f;
 template<class T>void Put(void* p,size_t n,T value){memcpy(static_cast<uint8_t*>(p)+n,&value,sizeof value);}
 template<class T>T Get(void* p,size_t n){T value;memcpy(&value,static_cast<uint8_t*>(p)+n,sizeof value);return value;}
 uint32_t* Entity(void* c,uint32_t* out){*out=static_cast<Context*>(c)->id;return out;}
 void Dirty(void*,uint64_t,uint64_t,uint64_t,uint16_t,uint8_t){}
 void* Ray(void* out,void*,const float*,const float*,const uint8_t*){
-    Put<uint8_t>(out,0x12,rayComplete);Put<uint8_t>(out,0x13,rayHit);Put<float>(out,4,123.25f);return out;
+    Put<uint8_t>(out,0x12,rayComplete);Put<uint8_t>(out,0x13,rayHit);Put<float>(out,4,rayHeight);return out;
 }
 bool Iterate(void* c,void*,size_t){if(!yieldEntity||cursor++)return false;static_cast<Context*>(c)->id=1;return true;}
 void Receive(void*){}
@@ -83,7 +87,7 @@ uint8_t* Find(const char* pattern,void*){
     return nullptr;
 }
 void* Redirect(uint8_t* site,void* detour){
-    if(site==functions[0]+0xfb2){gateHook=reinterpret_cast<GateFn>(detour);return reinterpret_cast<void*>(NativeGate);}
+    if(site==functions[0]+0x10b8){gateHook=reinterpret_cast<GateFn>(detour);return reinterpret_cast<void*>(NativeGate);}
     assert(hookCount<4);hooks[hookCount++]=reinterpret_cast<Next>(detour);return reinterpret_cast<void*>(Iterate);}
 void* Hook(uint8_t* site,void* detour,size_t length,const uint8_t*,size_t){
     if(site==functions[2]+300){assert(length==19);boundsHook=reinterpret_cast<BoundsFn>(detour);return reinterpret_cast<void*>(SetBounds);}
@@ -98,8 +102,8 @@ bool ObserveTest(void* ctx,void* desc,size_t n) {
 }
 void Read(const void* p,void* out,size_t n){memcpy(out,p,n);}
 void Log(const char*){}
-void SetupSites(){const uint8_t gate[]={0xb2,0x0b,0x48,0x8b,0xc8,0xe8,0,0,0,0,0x84,0xc0,0x0f,0x85};memcpy(functions[0]+0xe91,gate,sizeof gate);const size_t offsets[2][2]={{0x36,0x21f6},{0x31,0x7be}};for(unsigned i=0;i<2;++i)for(auto offset:offsets[i]){auto site=functions[i]+offset;site[0]=0xe8;Put(site,1,static_cast<int32_t>(functions[2]-(site+5)));}
-    auto gateSite=functions[0]+0xfb2;gateSite[0]=0xe8;Put(gateSite,1,static_cast<int32_t>(reinterpret_cast<uint8_t*>(NativeGate)-(gateSite+5)));}
+void SetupSites(){const uint8_t gate[]={0xb2,0x0b,0x48,0x8b,0xc8,0xe8,0,0,0,0,0x84,0xc0,0x0f,0x85};memcpy(functions[0]+0xe91,gate,sizeof gate);const size_t offsets[2][2]={{0x35,0x11c6},{0x31,0x7be}};for(unsigned i=0;i<2;++i)for(auto offset:offsets[i]){auto site=functions[i]+offset;site[0]=0xe8;Put(site,1,static_cast<int32_t>(functions[2]-(site+5)));}
+    auto gateSite=functions[0]+0x10b8;gateSite[0]=0xe8;Put(gateSite,1,static_cast<int32_t>(reinterpret_cast<uint8_t*>(NativeGate)-(gateSite+5)));}
 }
 int main(int argc,char** argv){
     using namespace teleport;using namespace teleport::travel;
@@ -132,6 +136,31 @@ int main(int argc,char** argv){
     Put(terrain.data(),0x1bf8,realm.data());Put<uint64_t>(terrain.data(),0x1c00,1);
     Put(realm.data(),0,grid.data());Put<uint32_t>(grid.data(),0x10,3);
     Put<uint32_t>(grid.data(),0x14,128);Put<uint32_t>(grid.data(),0x18,32);
+    // A joined client's native ground query can serve read-only probes without
+    // claiming authoritative hosting or queuing any travel action.
+    {
+        TerrainProbe probe;probe.registry=storage;probe.x=3749;probe.z=1434;probe.startY=850;
+        assert(MapTeleportTerrainProbe(&probe)&&probe.state==TerrainProbeState::unavailable);
+        Put<uint8_t>(runtime,0xa1,1);
+        Put<float>(grid.data(),0x70,3500.f);Put<float>(grid.data(),0x74,800.f);Put<float>(grid.data(),0x78,1000.f);
+        rayHeight=843.5f;
+        uint8_t groundDesc[0x100]{},groundOut[64]{};Put(groundDesc,0,static_cast<void*>(&context));Put(groundDesc,0xf8,terrain.data());
+        groundHook(groundOut,nullptr,groundDesc);
+        assert(!HostsWorld());assert(MapTeleportTerrainProbe(&probe)&&probe.state==TerrainProbeState::ready&&probe.height==843.5);
+        assert(position.x==0&&position.y==0&&position.z==0&&directCount==0);
+        rayComplete=0;assert(MapTeleportTerrainProbe(&probe)&&probe.state==TerrainProbeState::loading);rayComplete=1;
+        rayHit=0;assert(MapTeleportTerrainProbe(&probe)&&probe.state==TerrainProbeState::invalid);rayHit=1;
+        rayHeight=850;assert(MapTeleportTerrainProbe(&probe)&&probe.state==TerrainProbeState::invalid);rayHeight=843.5f;
+        probe.registry=storage+1;assert(MapTeleportTerrainProbe(&probe)&&probe.state==TerrainProbeState::unavailable);probe.registry=storage;
+        testNow+=2001;assert(MapTeleportTerrainProbe(&probe)&&probe.state==TerrainProbeState::unavailable);
+        groundHook(groundOut,nullptr,groundDesc);assert(MapTeleportTerrainProbe(&probe)&&probe.state==TerrainProbeState::ready);
+        probe.x=0;assert(MapTeleportTerrainProbe(&probe)&&probe.state==TerrainProbeState::invalid);probe.x=3749;
+        Put<uint8_t>(runtime,0xbb,1);groundHook(groundOut,nullptr,groundDesc);
+        assert(MapTeleportTerrainProbe(&probe)&&probe.state==TerrainProbeState::unavailable);
+        SetClient(nullptr);assert(MapTeleportTerrainProbe(&probe)&&probe.state==TerrainProbeState::unavailable);
+        Put<uint8_t>(runtime,0xa1,0);Put<uint8_t>(runtime,0xbb,0);
+        Put<float>(grid.data(),0x70,0.f);Put<float>(grid.data(),0x74,0.f);Put<float>(grid.data(),0x78,0.f);rayHeight=123.25f;
+    }
     Put(playerDesc,0xb8,static_cast<void*>(command));
     Put(playerDesc,0x80,static_cast<void*>(input));Put(playerDesc,0x2f8,static_cast<void*>(control));Put(playerDesc,0xe8,static_cast<void*>(command));
     Put(applyDesc,0x10,static_cast<void*>(&position));Put(applyDesc,0x100,static_cast<void*>(component));

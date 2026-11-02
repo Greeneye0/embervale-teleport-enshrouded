@@ -40,7 +40,7 @@ void Fill(Box& box,uint32_t color) {
 }
 void Line(const std::string& value,void* assets,uint32_t color,uint64_t visible=~uint64_t(0)) {
     auto text=MakeText(value.c_str());alignas(16) uint8_t buffer[0x400]{};
-    label(buffer,&text,static_cast<uint8_t*>(assets)+0x10a0c,0);
+    label(buffer,&text,static_cast<uint8_t*>(assets)+0x10bbc,0);
     buffer[0x3d]=1;at<uint32_t>(buffer,0xb0)=color;at<float>(buffer,0xb4)=1;
     // Native EndLabel uses +0xa0 as its visible-glyph limit (normally -1).
     // Shape and measure the complete line once, then reveal glyphs without

@@ -33,7 +33,7 @@ void* currentApp=nullptr;
 // UI snapshots and the live game client are distinct objects. Use the command
 // loop's live client for world identity, player state, and command dispatch.
 void* GameClient(void* app) {
-    auto ui=app?at<void*>(app,0x35280):nullptr;
+    auto ui=app?at<void*>(app,0x352a0):nullptr;
     return ui?at<void*>(ui,0x1b8):nullptr;
 }
 teleport::Countdown countdown;
@@ -101,8 +101,8 @@ bool MapFrame(void* widget,uint8_t* state) {
     bool chord=Down(VK_SHIFT);
     if(clicked&&chord&&!countdown.active) {
         teleport::Destination target{};
-        float ox=at<float>(view,0x1e0)+at<float>(view,0x17c)-at<float>(view,0x1e8);
-        float oy=at<float>(view,0x1e4)+at<float>(view,0x180)-at<float>(view,0x1ec);
+        float ox=at<float>(view,0x1f0)+at<float>(view,0x18c)-at<float>(view,0x1f8);
+        float oy=at<float>(view,0x1f4)+at<float>(view,0x190)-at<float>(view,0x1fc);
         if(teleport::Convert(x,y,ox,oy,at<float>(view,0x10),at<float>(view,0x38),at<float>(view,0x3c),target)) {
             countdown.start(GetTickCount64(),target); owner=state;world=currentWorld;swallow=true;
             Log("Map Teleport: countdown started");
@@ -110,7 +110,7 @@ bool MapFrame(void* widget,uint8_t* state) {
     }
     bool block=countdown.active||swallow;
     if(block) {
-        at<uint8_t>(state,0xf8)=0; at<uint64_t>(state,0x56310)=0;at<uint64_t>(state,0x28)=0;
+        at<uint8_t>(state,0xf8)=0; at<uint64_t>(state,0x542e8)=0;at<uint64_t>(state,0x28)=0;
         alignas(16) uint8_t action[64]{}; updateView(view,action,1);
     }
     if(!down) swallow=false; // swallow the release frame too
@@ -270,16 +270,16 @@ GREENEYE_MOD_START {
     bool serverSide=host->side==kGreeneyeServer;
     // Every hook and call is found by signature, and bindings that do not match turn the mod off.
     // Other builds (patches, repacks with a changed header) run when the signatures match.
-    if(nt->FileHeader.TimeDateStamp!=(serverSide?0x6ad77f14u:0x6ad77f0cu) || nt->OptionalHeader.SizeOfImage!=(serverSide?0x1dd1000u:0x2a1e000u)) {
+    if(nt->FileHeader.TimeDateStamp!=(serverSide?0x6ae46022u:0x6ae4601eu) || nt->OptionalHeader.SizeOfImage!=(serverSide?0x1dde000u:0x2a40000u)) {
         char line[160];sprintf_s(line,"Map Teleport: untested game build (stamp %08lx, size %lx); running if its signatures match",
             nt->FileHeader.TimeDateStamp,nt->OptionalHeader.SizeOfImage);Log(line);
     }
     if(!greeneye::ClaimProcess(L"MapTeleport",host)) return false;
     if(!teleport::protection::Init(host)){Log("Map Teleport: protection bindings unavailable; disabled");return false;}
     if(!teleport::travel::Init(host)) {Log("Map Teleport: host bindings unavailable; disabled");return false;}
-    if(serverSide) {Log("Embervale Teleport 1.1.6: server companion loaded");return true;}
+    if(serverSide) {Log("Embervale Teleport 1.1.7: server companion loaded");return true;}
     auto mapTail=host->find("48 8D AC 24 A0 F8 FF FF 48 81 EC 60 08 00 00 48 8B 05",nullptr);
-    auto loop=host->find("40 53 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 48 8D 81 58 4F 03 00",nullptr);
+    auto loop=host->find("40 53 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 48 8D 81 78 4F 03 00",nullptr);
     auto send=host->find("4C 8B DC 55 56 57 49 8D AB 18 FF FF FF",nullptr);
     auto image=host->find("4D 8B 09 45 8B 00 E9 ?? ?? ?? ?? CC",nullptr);
     auto view=host->find("48 8B C4 48 89 58 20 55 56 57 41 56 41 57 48 8D 68 98 48 81 EC 40 01 00 00",nullptr);
@@ -296,7 +296,7 @@ GREENEYE_MOD_START {
     nextLoop=reinterpret_cast<LoopFn>(host->hook(loop,reinterpret_cast<void*>(LoopHook),13,nullptr,0));
     nextPlay=reinterpret_cast<LoopFn>(host->hook(play,reinterpret_cast<void*>(PlayHook),18,nullptr,0));
     if(!nextMap||!nextLoop||!nextPlay) {paused=true;Log("Map Teleport: hook installation failed");return false;}
-    Log("Embervale Teleport 1.1.6: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
+    Log("Embervale Teleport 1.1.7: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
 }
 // Dev tools: teleport the local player to world x / z (metres), landing like a map hold. 1 = queued.
 extern "C" __declspec(dllexport) int MapTeleportRequest(double x,double z) {
