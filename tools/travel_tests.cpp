@@ -83,7 +83,7 @@ uint8_t* Find(const char* pattern,void*){
     return nullptr;
 }
 void* Redirect(uint8_t* site,void* detour){
-    if(site==functions[0]+0xfb2){gateHook=reinterpret_cast<GateFn>(detour);return reinterpret_cast<void*>(NativeGate);}
+    if(site==functions[0]+0x10b8){gateHook=reinterpret_cast<GateFn>(detour);return reinterpret_cast<void*>(NativeGate);}
     assert(hookCount<4);hooks[hookCount++]=reinterpret_cast<Next>(detour);return reinterpret_cast<void*>(Iterate);}
 void* Hook(uint8_t* site,void* detour,size_t length,const uint8_t*,size_t){
     if(site==functions[2]+300){assert(length==19);boundsHook=reinterpret_cast<BoundsFn>(detour);return reinterpret_cast<void*>(SetBounds);}
@@ -98,8 +98,8 @@ bool ObserveTest(void* ctx,void* desc,size_t n) {
 }
 void Read(const void* p,void* out,size_t n){memcpy(out,p,n);}
 void Log(const char*){}
-void SetupSites(){const uint8_t gate[]={0xb2,0x0b,0x48,0x8b,0xc8,0xe8,0,0,0,0,0x84,0xc0,0x0f,0x85};memcpy(functions[0]+0xe91,gate,sizeof gate);const size_t offsets[2][2]={{0x36,0x21f6},{0x31,0x7be}};for(unsigned i=0;i<2;++i)for(auto offset:offsets[i]){auto site=functions[i]+offset;site[0]=0xe8;Put(site,1,static_cast<int32_t>(functions[2]-(site+5)));}
-    auto gateSite=functions[0]+0xfb2;gateSite[0]=0xe8;Put(gateSite,1,static_cast<int32_t>(reinterpret_cast<uint8_t*>(NativeGate)-(gateSite+5)));}
+void SetupSites(){const uint8_t gate[]={0xb2,0x0b,0x48,0x8b,0xc8,0xe8,0,0,0,0,0x84,0xc0,0x0f,0x85};memcpy(functions[0]+0xe91,gate,sizeof gate);const size_t offsets[2][2]={{0x35,0x11c6},{0x31,0x7be}};for(unsigned i=0;i<2;++i)for(auto offset:offsets[i]){auto site=functions[i]+offset;site[0]=0xe8;Put(site,1,static_cast<int32_t>(functions[2]-(site+5)));}
+    auto gateSite=functions[0]+0x10b8;gateSite[0]=0xe8;Put(gateSite,1,static_cast<int32_t>(reinterpret_cast<uint8_t*>(NativeGate)-(gateSite+5)));}
 }
 int main(int argc,char** argv){
     using namespace teleport;using namespace teleport::travel;
