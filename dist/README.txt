@@ -1,4 +1,4 @@
-EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.7
+EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.8
 ==========================================================================
 
 Open the world map, hold Shift and hold the left mouse button on any spot for one second.
@@ -34,7 +34,7 @@ The mod has to be on the server AND on the game of every player who wants to tel
        greeneye\map-teleport\...
 4. Start the server.
 5. Check it loaded: greeneye\loader.log in the server folder should contain
-   "Embervale Teleport 1.1.7: server companion loaded".
+   "Embervale Teleport 1.1.8: server companion loaded".
 Players: each player installs the mod on their own game as above. Players without the mod
 can still join and play; they just can't teleport, and see nothing from the mod.
 Settings: the server's own map-teleport.ini decides how teleports behave for everyone on
@@ -51,6 +51,9 @@ USE
   up while you hold.
 - Let go early, press Esc or right-click to cancel. Moving the mouse while holding keeps
   the spot you first clicked.
+- With a controller: pan the map so the spot is in the middle (left stick), then hold Y
+  for one second. The ring fills in the middle of the map; let go early to cancel.
+  [Controller] Button in the ini picks another button, or Off.
 - If the land at the destination isn't loaded yet, the mod waits for it, so you never
   land inside a hill or in the air.
 - Short notices ("Teleporting in 3...") tell you what is happening, in the game's language:
@@ -97,6 +100,11 @@ GOOD TO KNOW
 
 CHANGES
 -------
+1.1.8
+- Controller support: pan the map with the left stick so the spot is in the middle,
+  then hold Y for one second. [Controller] Button in the ini picks another button,
+  or Off.
+
 1.1.7
 - Updated for the 2 November 2026 game patch (game build 1283531). After the
   patch 1.1.6 switched itself off ("host bindings unavailable; disabled" in

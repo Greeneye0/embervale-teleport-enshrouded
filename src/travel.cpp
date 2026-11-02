@@ -684,8 +684,10 @@ bool Prepare() {
     paused=true;std::lock_guard guard(lock);
     // An expired request may still own a native Teleport component. Let the
     // native iterator cancel/finish it before allowing the hook to unload.
-    for(auto& p:requests)if(p.stage!=Stage::none)return false;
-    return !protection::Busy();
+    bool busy=protection::Busy();
+    for(auto& p:requests)if(p.stage!=Stage::none)busy=true;
+    if(busy)paused=false; // not swapped now: keep running until asked again
+    return !busy;
 }
 void Resume(){paused=false;}
 }

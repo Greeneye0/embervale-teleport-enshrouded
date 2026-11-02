@@ -173,6 +173,13 @@ int main() {
      assert(journey.phase==Phase::complete&&!journey.rememberFirstUse());
  }
  assert(ParseSwitch(L" TRUE ",false)&&!ParseSwitch(L"Off",true));
+ {   // Controller: the map's centre (as logged in game: 3218.6, 8192.1 on the 10240 m map) and button names.
+     Destination centre;assert(MapCentre(3218.6f,8192.1f,10240,10240,centre));
+     assert(std::fabs(double(centre.x)/4294967296.0-3218.6)<0.01&&std::fabs(double(centre.z)/4294967296.0-(10240-8192.1))<0.01);
+     assert(!MapCentre(-1,10,10240,10240,centre)&&!MapCentre(10,10241,10240,10240,centre)&&!MapCentre(NAN,10,10240,10240,centre));
+     assert(ParseControllerButton(L" y ")==0x8000&&ParseControllerButton(L"RS")==0x80&&ParseControllerButton(L"off")==0);
+     assert(ParseControllerButton(L"Start")==0x10&&ParseControllerButton(L"down")==2&&ParseControllerButton(L"???")==0x8000);
+ }
  assert(!ParseSwitch(L"garbage",false)&&ParseSwitch(L"garbage",true));
  wchar_t temp[MAX_PATH],filename[MAX_PATH];assert(GetTempPathW(MAX_PATH,temp));
  assert(GetTempFileNameW(temp,L"mtp",0,filename));
@@ -233,7 +240,7 @@ int main() {
  puts("PASS: map zoom/pan conversion, bounds, nonfinite data, one-second timing and cancellation");
  puts("PASS: request bounds/malformed input, native terrain completeness, surface height, missing/outside terrain");
  puts("PASS: all three prank scripts, protection/arrival acknowledgments, recovery at every phase, independent deluxe policy");
- puts("PASS: INI switches, persistent per-account history, interrupted/completed visits, corrupt history rejection");
+ puts("PASS: controller map-centre target and button names; INI switches, persistent per-account history, interrupted/completed visits, corrupt history rejection");
  puts("PASS: scene-bound altitude selection, boundary rejection and insufficient headroom (native enforcement unverified)");
  puts("PASS: ground above the world limit or at the ray start is rechecked; lower ray start; two-reading agreement; pits land on the rim");
 }

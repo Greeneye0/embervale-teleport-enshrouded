@@ -1,0 +1,2 @@
+1.1.8
+- Controller support: pan the map with the left stick so the spot is in the middle, then hold Y for one second. [Controller] Button in the ini picks another button, or Off.

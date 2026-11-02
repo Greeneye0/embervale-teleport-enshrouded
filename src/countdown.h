@@ -9,6 +9,14 @@ inline bool Convert(float sx,float sy,float ox,float oy,float zoom,float width,f
     if (!std::isfinite(x)||!std::isfinite(z)||x<0||z<0||x>width||z>height) return false;
     out={int64_t(x*4294967296.0),0,int64_t(z*4294967296.0)}; return true;
 }
+// The middle of the map view in map units (x right, y down from the top edge), as a world
+// destination: x stays, z counts up from the map's bottom edge.
+inline bool MapCentre(float mx,float my,float width,float height,Destination& out) {
+    if(!std::isfinite(mx)||!std::isfinite(my)||!std::isfinite(width)||!std::isfinite(height)||width<=0||height<=0||width>100000||height>100000)return false;
+    double x=mx,z=double(height)-my;
+    if(x<0||z<0||x>width||z>height)return false;
+    out={int64_t(x*4294967296.0),0,int64_t(z*4294967296.0)};return true;
+}
 struct Countdown {
     bool active=false;
     uint64_t started=0;
