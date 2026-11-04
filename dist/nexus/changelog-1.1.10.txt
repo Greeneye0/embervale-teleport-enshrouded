@@ -1,0 +1,1 @@
+- Greeneye Loader 1.2.2: logs are written in the background, so a slow drive can't stall the game through them. This may help the freezes HadToRegister reported.

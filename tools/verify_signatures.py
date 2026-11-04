@@ -34,6 +34,6 @@ for index,path in enumerate(paths):
   for pat in re.findall(r'Bind\(host,\w+,"([^"]+)"',popup):assert len(find(data,pat))==1,('popup',pat)
   a=data.find(bytes.fromhex('48 8D AC 24 A0 F8 FF FF 48 81 EC 60 08 00 00 48 8B 05'))
   assert data[a-16:a]==bytes.fromhex('48 89 5C 24 08 55 56 57 41 54 41 55 41 56 41 57')
-  assert a+0x16+struct.unpack_from('<i',data,a+0x12)[0]==0x28404a8
+  assert a+0x16+struct.unpack_from('<i',data,a+0x12)[0]==0x283f4a8
  print('PASS:',pathlib.Path(path).name,'unique travel/physics hooks, native iterator call targets and chat bindings')
 print('Static validation only: animation, realm ownership and multiplayer behavior require gameplay testing.')

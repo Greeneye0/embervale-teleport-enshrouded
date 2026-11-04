@@ -117,7 +117,7 @@ int main() {
          // Russian in any form the game may use, Ukrainian in its other forms.
          {"Легендарное",text::Lang::ru},{"Легендарная",text::Lang::ru},{"Легендарные",text::Lang::ru},
          {"ЛЕГЕНДАРНОЕ",text::Lang::ru},{"Легендарна",text::Lang::uk},{"Легендарне",text::Lang::uk},
-         {"Легендарні",text::Lang::uk}}) {
+         {"Легендарні",text::Lang::uk},{"Легендарн.",text::Lang::uk},{"Legendário",text::Lang::pt},{"Легенд.",text::Lang::ru}}) {
      text::Lang found=text::Lang::count;assert(text::Detect(word,found)&&found==lang);
  }
  {text::Lang kept=text::Lang::de;assert(!text::Detect("",kept)&&!text::Detect("???",kept)&&kept==text::Lang::de);}
