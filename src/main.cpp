@@ -12,6 +12,7 @@
 #include "countdown.h"
 #include "travel.h"
 #include "settings.h"
+#include "input_binds.h"
 #include "protocol.h"
 #include "popup.h"
 #include "identity.h"
@@ -49,7 +50,7 @@ struct Watching {
     teleport::NoticePhase shown=teleport::NoticePhase::failed;unsigned countdown=0;bool prank=false;
 } watching;
 void Log(const char* message) {greeneye::Host()->log(message);}
-bool Down(int key) {return (GetAsyncKeyState(key)&0x8000)!=0;}
+bool Down(int key) {return greeneye::input::KeyDown(key);}
 bool Cursor(float& x,float& y) {
     HWND w=GetForegroundWindow(); DWORD pid=0; GetWindowThreadProcessId(w,&pid);
     POINT p{}; RECT r{};
@@ -88,38 +89,60 @@ void Cancel(const char* reason="state reset") {
 }
 void Ring(void*,float x,float y,float progress) {teleport::popup::DrawRing(x,y,progress);}
 // Controllers: the game reads them itself, so the mod only watches them through XInput. Holding
-// [Controller] Button (Y by default) for one second travels to the middle of the map view, which
-// the left stick pans; the game keeps no controller pointer on the map. 0 = off.
-using XInputGetStateFn=DWORD(WINAPI*)(DWORD,XINPUT_STATE*);
-XInputGetStateFn xinputGetState=nullptr;WORD padButton=0;
-bool PadDown() {
-    // XInputGetState on an empty slot is slow, so look for a connected one once a second.
-    static int slot=-1;static uint64_t nextScan=0;
-    if(!padButton||!xinputGetState)return false;
-    XINPUT_STATE state{};
-    if(slot>=0&&xinputGetState(DWORD(slot),&state)==ERROR_SUCCESS)return (state.Gamepad.wButtons&padButton)!=0;
-    slot=-1;auto now=GetTickCount64();if(now<nextScan)return false;nextScan=now+1000;
-    for(DWORD i=0;i<XUSER_MAX_COUNT;++i)if(xinputGetState(i,&state)==ERROR_SUCCESS){slot=int(i);return (state.Gamepad.wButtons&padButton)!=0;}
-    return false;
+// Travel's Pad: part ([Keys] Travel, or [Controller] Button) for one second travels to the middle of
+// the map view, which the left stick pans; the game keeps no controller pointer on the map. By default
+// LT+RT: the game's zoom buttons. The map zooms in during the hold but keeps its centre, the target. Y,
+// the default before, is also the game's Fast Travel on the map, so a file with Button=Y gets LT+RT too.
+// [Keys] are read again when the .ini changes.
+namespace inp=greeneye::input;
+inp::Binding travelBinding=inp::MakeBinding("Shift+Mouse1, Pad:LT+RT"),cancelBinding=inp::MakeBinding("Esc, Mouse2");
+std::wstring iniWide;std::string iniNarrow;inp::FileWatch iniWatch;
+void ReadBindings() {
+    if(iniNarrow.empty()||!iniWatch.Changed(iniNarrow.c_str()))return;
+    inp::Binding fallback=inp::MakeBinding("Shift+Mouse1, Pad:LT+RT");
+    if(const unsigned button=teleport::ReadControllerButton(iniWide.c_str());!button)fallback.padCount=0; // Off
+    else if(button!=XINPUT_GAMEPAD_Y){fallback.pads[0]=inp::PadChord{};fallback.pads[0].buttons=uint16_t(button);}
+    auto read=[&](const char* name,const inp::Binding& base,const char* written,inp::Binding& out) {
+        char text[128]{};std::string why;
+        if(!GetPrivateProfileStringA("Keys",name,"",text,sizeof(text),iniNarrow.c_str()))WritePrivateProfileStringA("Keys",name,written,iniNarrow.c_str());
+        if(!inp::ParseBinding(text,base,out,&why)){char line[200];sprintf_s(line,"Map Teleport: [Keys] %s: '%s' is not a key or button this mod knows",name,why.c_str());Log(line);}
+    };
+    read("Travel",fallback,"Shift+Mouse1",travelBinding);
+    read("Cancel",inp::MakeBinding("Esc, Mouse2"),"Esc, Mouse2",cancelBinding);
+    char line[200];sprintf_s(line,"Map Teleport: travel %s; cancel %s",inp::BindingToText(travelBinding).c_str(),inp::BindingToText(cancelBinding).c_str());Log(line);
 }
-bool Foreground() {DWORD pid=0;GetWindowThreadProcessId(GetForegroundWindow(),&pid);return pid==GetCurrentProcessId();}
+bool PadDown() {return travelBinding.padCount&&inp::PadHeld(travelBinding,inp::ReadPad());}
+bool Foreground() {return inp::GameHasFocus();}
+// A Travel key is down; chord: with its modifiers (a modifier let go during the hold doesn't end it).
+bool TravelKeyDown(bool* chord=nullptr) {
+    bool any=false;
+    if(chord)*chord=false;
+    for(int i=0;i<travelBinding.keyCount;++i) {
+        const inp::KeyChord& key=travelBinding.keys[i];
+        if(!key.vk||!Down(key.vk))continue;
+        any=true;
+        if(chord&&inp::ChordHeld(key,Down))*chord=true;
+    }
+    return any;
+}
+bool CancelDown(bool pad) {return inp::KeyOfHeld(cancelBinding,Down,pad);}
 bool MapFrame(void* widget,uint8_t* state) {
     if(paused||broken) return false;
     bool consecutive=seen+1==frame || seen==frame;
     seen=frame;
-    float x=0,y=0; bool focused=Cursor(x,y), down=Down(VK_LBUTTON), pad=PadDown()&&Foreground();
+    ReadBindings();
+    float x=0,y=0; bool chord=false; bool focused=Cursor(x,y), down=TravelKeyDown(&chord), pad=PadDown()&&Foreground();
     if(!consecutive) {Cancel("map frame gap");lastDown=down;lastPad=pad;swallow=false;}
     bool clicked=down&&!lastDown; lastDown=down;
     bool pressed=pad&&!lastPad; lastPad=pad;
     if(padHold) {if(!pad) Cancel("controller button released");} // early release cancels
     else if(!down) Cancel("mouse released in map");
-    if(Down(VK_ESCAPE)||(!padHold&&(!focused||Down(VK_RBUTTON)))) {Cancel("map focus or cancel key");if(!pressed)return false;}
+    if(CancelDown(padHold)||(!padHold&&!focused)) {Cancel("map focus or cancel key");if(!pressed)return false;}
     auto* client=GameClient(currentApp);
     auto* currentWorld=client?at<void*>(client,0x47d4e0):nullptr;
     auto* view=state?at<uint8_t*>(state,8):nullptr;
     if(!currentWorld||!view) {Cancel("missing world or view");return false;}
     if(countdown.active&&(owner!=state||world!=currentWorld)) Cancel("map owner or world changed");
-    bool chord=Down(VK_SHIFT);
     float ox=at<float>(view,0x1f0)+at<float>(view,0x18c)-at<float>(view,0x1f8);
     float oy=at<float>(view,0x1f4)+at<float>(view,0x190)-at<float>(view,0x1fc);
     float zoom=at<float>(view,0x10),width=at<float>(view,0x38),height=at<float>(view,0x3c);
@@ -129,11 +152,11 @@ bool MapFrame(void* widget,uint8_t* state) {
             countdown.start(GetTickCount64(),target); owner=state;world=currentWorld;swallow=true;
             Log("Map Teleport: countdown started");
         }
-    } else if(pressed&&!Down(VK_ESCAPE)&&!countdown.active) {
+    } else if(pressed&&!CancelDown(true)&&!countdown.active) {
         teleport::Destination target{};
         if(teleport::MapCentre(at<float>(view,0x30),at<float>(view,0x34),width,height,target)) {
             countdown.start(GetTickCount64(),target); owner=state;world=currentWorld;padHold=true;
-            Log("Map Teleport: countdown started (controller, map centre)");
+            {char line[120];sprintf_s(line,"Map Teleport: countdown started (controller, map centre %.1f, %.1f)",double(target.x)/4294967296.0,double(target.z)/4294967296.0);Log(line);}
         }
     }
     bool block=countdown.active||swallow;
@@ -170,8 +193,8 @@ void EndFrame(void* app) {
     float x,y;
     // Recheck LMB here too: it can be released between map rendering and dispatch.
     if(seen!=frame) {Cancel("dispatch without map frame");return;}
-    if(padHold){if(!PadDown()||!Foreground()||Down(VK_ESCAPE)) {Cancel("dispatch focus, controller release or cancel key");return;}}
-    else if(!Cursor(x,y)||!Down(VK_LBUTTON)||Down(VK_ESCAPE)||Down(VK_RBUTTON)) {Cancel("dispatch focus, mouse release or cancel key");return;}
+    if(padHold){if(!PadDown()||!Foreground()||CancelDown(true)) {Cancel("dispatch focus, controller release or cancel key");return;}}
+    else if(!Cursor(x,y)||!TravelKeyDown()||CancelDown(false)) {Cancel("dispatch focus, key release or cancel key");return;}
     if(!countdown.due(GetTickCount64())) return;
     auto* client=GameClient(app);
     if(!client||at<void*>(client,0x47d4e0)!=world) {Cancel("dispatch world mismatch");return;}
@@ -308,7 +331,7 @@ GREENEYE_MOD_START {
     if(!greeneye::ClaimProcess(L"MapTeleport",host)) return false;
     if(!teleport::protection::Init(host)){Log("Map Teleport: protection bindings unavailable; disabled");return false;}
     if(!teleport::travel::Init(host)) {Log("Map Teleport: host bindings unavailable; disabled");return false;}
-    if(serverSide) {Log("Embervale Teleport 1.1.10: server companion loaded");return true;}
+    if(serverSide) {Log("Embervale Teleport 1.1.11: server companion loaded");return true;}
     auto mapTail=host->find("48 8D AC 24 A0 F8 FF FF 48 81 EC 60 08 00 00 48 8B 05",nullptr);
     auto loop=host->find("40 53 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 48 8D 81 78 4F 03 00",nullptr);
     auto send=host->find("4C 8B DC 55 56 57 49 8D AB 18 FF FF FF",nullptr);
@@ -319,10 +342,12 @@ GREENEYE_MOD_START {
     int32_t displacement=0;host->read(mapTail+0x12,&displacement,4);
     root=reinterpret_cast<void**>(mapTail+0x16+displacement);
     if(!teleport::popup::Init(host,root)){Log("Map Teleport: native notice bindings unavailable");return false;}
-    if(host->modDir)padButton=WORD(teleport::ReadControllerButton((std::wstring(host->modDir)+L"\\map-teleport.ini").c_str()));
-    if(padButton) {
-        if(auto xinput=LoadLibraryW(L"xinput1_4.dll"))xinputGetState=reinterpret_cast<XInputGetStateFn>(GetProcAddress(xinput,"XInputGetState"));
-        if(!xinputGetState)Log("Map Teleport: XInput unavailable; controller map teleport off");
+    if(host->modDir) {
+        iniWide=std::wstring(host->modDir)+L"\\map-teleport.ini";
+        char narrow[MAX_PATH*3]{};
+        WideCharToMultiByte(CP_ACP,0,iniWide.c_str(),-1,narrow,sizeof(narrow),nullptr,nullptr);
+        iniNarrow=narrow;
+        ReadBindings();
     }
     // cmp byte [rdi+allowed],0 / jne / cmp byte [rdx+1],4 in the chat command (0x74).
     if(auto check=host->find("80 BF ?? ?? ?? ?? 00 75 ?? 80 7A 01 04",nullptr))host->read(check+2,&textChatAllowed,4);
@@ -332,7 +357,7 @@ GREENEYE_MOD_START {
     nextLoop=reinterpret_cast<LoopFn>(host->hook(loop,reinterpret_cast<void*>(LoopHook),13,nullptr,0));
     nextPlay=reinterpret_cast<LoopFn>(host->hook(play,reinterpret_cast<void*>(PlayHook),18,nullptr,0));
     if(!nextMap||!nextLoop||!nextPlay) {paused=true;Log("Map Teleport: hook installation failed");return false;}
-    Log("Embervale Teleport 1.1.10: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
+    Log("Embervale Teleport 1.1.11: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
 }
 // Dev tools: teleport the local player to world x / z (metres), landing like a map hold. 1 = queued.
 extern "C" __declspec(dllexport) int MapTeleportRequest(double x,double z) {

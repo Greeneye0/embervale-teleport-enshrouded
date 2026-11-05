@@ -15,3 +15,4 @@ dist/*.zip
 
 # raw disassembly dumps and query results from the research tools
 tools/*.txt
+bin-dev/

@@ -1,0 +1,2 @@
+- The controller hold on the map is now LT + RT together for one second, instead of Y: Y is also the game's Fast Travel to last visited Altar. An ini still on Button=Y moves over by itself. Tested with an emulated controller, not yet on a real pad.
+- Keys and buttons are now rebound under [Keys] in the ini: Travel and Cancel, for example Shift+Mouse1, Pad:RS+X.
