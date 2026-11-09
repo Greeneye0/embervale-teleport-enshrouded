@@ -233,8 +233,38 @@ void Dispatch(void* client,teleport::Destination target) {
     alignas(8) uint8_t openPlay[0x410]{};openPlay[0]=0x01;openPlay[1]=1;dispatch(client,openPlay);
     Log("Map Teleport: travel request queued; waiting for host terrain resolution");
 }
+#ifdef MAP_TELEPORT_DEV
+// Dev builds only: greeneye\map-teleport\portrait-test.txt plays a prank script's three lines and
+// the prank's thank-you with the host's reactions, 7 s each, without any teleport. The file's
+// first character picks the script (0, 1 or 2; anything else: 0).
+void PortraitTest() {
+    using namespace teleport;
+    static int step=-1;static unsigned scenario=0;static uint64_t next=0,poll=0;
+    auto now=GetTickCount64();
+    if(step<0){
+        auto* host=greeneye::Host();
+        if(now<poll||!host||!host->modDir)return;
+        poll=now+1000;
+        auto path=std::wstring(host->modDir)+L"portrait-test.txt";
+        if(GetFileAttributesW(path.c_str())==INVALID_FILE_ATTRIBUTES)return;
+        char first=0;
+        FILE* f=nullptr;if(!_wfopen_s(&f,path.c_str(),L"rb")&&f){first=char(fgetc(f));fclose(f);}
+        if(!DeleteFileW(path.c_str()))return;
+        scenario=first>='0'&&first<='2'?unsigned(first-'0'):0;
+        step=0;next=0;char line[80];sprintf_s(line,"Map Teleport: portrait test, script %u",scenario);Log(line);
+    }
+    if(now<next)return;
+    if(step>=4){step=-1;return;}
+    popup::Show(popup::Say(text::Title),step<3?text::ScenarioLine(popup::Language(),scenario,unsigned(step)):popup::Say(text::PrankThankYou),7000,true,
+        popup::PrankMood(scenario,unsigned(step)));
+    ++step;next=now+7000;
+}
+#endif
 void StatusFrame(void* app) {
     using namespace teleport;
+#ifdef MAP_TELEPORT_DEV
+    PortraitTest();
+#endif
     auto current=GameClient(app);
     auto currentWorld=current?at<void*>(current,0x47d4e0):nullptr;
     travel::SetClient(currentWorld?current:nullptr);
@@ -291,12 +321,15 @@ void StatusFrame(void* app) {
             case NoticePhase::ascending:popup::Clear();break;
             default:break;
         }
-        uint64_t displayMs=Finished(status)?(watching.prank?7000:4000):7000;
+        uint64_t displayMs=Finished(status)?(watching.prank?8000:4000):7000;
         if(status.phase==NoticePhase::countdown)displayMs=2000;
         else if(status.phase==NoticePhase::problem)displayMs=problemMs;
         else if(status.phase==NoticePhase::scenic)displayMs=scenicMs;
         else if(status.phase==NoticePhase::correction)displayMs=correctionMs;
-        if(!message.empty())popup::Show(popup::Say(text::Title),std::string(message),displayMs,status.phase!=NoticePhase::countdown);
+        // The prank's host reacts to each beat of its script (popup::PrankMood).
+        unsigned beat=status.phase==NoticePhase::problem?1:status.phase==NoticePhase::correction?2:status.phase==NoticePhase::complete?3:0;
+        auto mood=watching.prank?popup::PrankMood(status.scenario,beat):popup::Mood::none;
+        if(!message.empty())popup::Show(popup::Say(text::Title),std::string(message),displayMs,status.phase!=NoticePhase::countdown,mood);
     }
     if(Finished(status)){watching={};travel::TrackRemote(0,LocalAccount());}
 }
@@ -331,7 +364,7 @@ GREENEYE_MOD_START {
     if(!greeneye::ClaimProcess(L"MapTeleport",host)) return false;
     if(!teleport::protection::Init(host)){Log("Map Teleport: protection bindings unavailable; disabled");return false;}
     if(!teleport::travel::Init(host)) {Log("Map Teleport: host bindings unavailable; disabled");return false;}
-    if(serverSide) {Log("Embervale Teleport 1.1.11: server companion loaded");return true;}
+    if(serverSide) {Log("Embervale Teleport 1.1.12: server companion loaded");return true;}
     auto mapTail=host->find("48 8D AC 24 A0 F8 FF FF 48 81 EC 60 08 00 00 48 8B 05",nullptr);
     auto loop=host->find("40 53 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 48 8D 81 78 4F 03 00",nullptr);
     auto send=host->find("4C 8B DC 55 56 57 49 8D AB 18 FF FF FF",nullptr);
@@ -357,7 +390,7 @@ GREENEYE_MOD_START {
     nextLoop=reinterpret_cast<LoopFn>(host->hook(loop,reinterpret_cast<void*>(LoopHook),13,nullptr,0));
     nextPlay=reinterpret_cast<LoopFn>(host->hook(play,reinterpret_cast<void*>(PlayHook),18,nullptr,0));
     if(!nextMap||!nextLoop||!nextPlay) {paused=true;Log("Map Teleport: hook installation failed");return false;}
-    Log("Embervale Teleport 1.1.11: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
+    Log("Embervale Teleport 1.1.12: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
 }
 // Dev tools: teleport the local player to world x / z (metres), landing like a map hold. 1 = queued.
 extern "C" __declspec(dllexport) int MapTeleportRequest(double x,double z) {

@@ -20,7 +20,7 @@ inline constexpr Scenario scenarios[]={
   "Please disregard the scenery moving rapidly past you. We are cancelling your appointment with the ground and arranging a gentler introduction."}
 };
 enum class Phase { idle, countdown, ascending, scenic, problem, correction, returning, restoring, complete };
-inline constexpr uint64_t scenicMs=15000,problemMs=5000,correctionMs=12000;
+inline constexpr uint64_t scenicMs=16000,problemMs=6000,correctionMs=13000;
 // Native adapters acknowledge every move and protection change. Elapsed time alone
 // never constitutes arrival or successful restoration.
 struct Journey {

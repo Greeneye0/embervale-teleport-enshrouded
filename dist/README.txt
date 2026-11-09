@@ -1,4 +1,4 @@
-EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.11
+EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.12
 ==========================================================================
 
 Open the world map, hold Shift and hold the left mouse button on any spot for one second.
@@ -34,7 +34,7 @@ The mod has to be on the server AND on the game of every player who wants to tel
        greeneye\map-teleport\...
 4. Start the server.
 5. Check it loaded: greeneye\loader.log in the server folder should contain
-   "Embervale Teleport 1.1.11: server companion loaded".
+   "Embervale Teleport 1.1.12: server companion loaded".
 Players: each player installs the mod on their own game as above. Players without the mod
 can still join and play; they just can't teleport, and see nothing from the mod.
 Settings: the server's own map-teleport.ini decides how teleports behave for everyone on
@@ -100,6 +100,9 @@ GOOD TO KNOW
 
 CHANGES
 -------
+1.1.12
+- Polished the wording and timing of some teleport notices.
+
 1.1.11
 - The controller hold on the map is now LT + RT together for one second, instead of Y: Y is
   also the game's Fast Travel to last visited Altar. An ini still on Button=Y moves over by

@@ -54,7 +54,25 @@ bool Init(const GreeneyeHost* host,void** root);
 text::Lang Language();
 inline const char* Say(text::Id id){return text::Get(Language(),id);}
 // Rendering uses the game's own widgets/labels; no input field or modal focus.
-void Show(std::string title,std::string message,uint64_t durationMs,bool typewriter=true);
+// The prank's notices are spoken by the outpost's host: a dialogue box at the bottom of the screen
+// with her head and bust at its left, as in a visual novel, her expression set by the mood
+// (host-portrait.png, host-worried.png, host-sheepish.png, host-wink.png, host-alarmed.png,
+// host-smug.png, host-puzzled.png). A missing picture falls back to host-portrait.png; without that the notice
+// shows as any other.
+enum class Mood {none,smile,worried,sheepish,wink,alarmed,smug,puzzled};
+// The host's reaction to a beat of a prank script (beat 0 opening, 1 problem, 2 correction, 3 the
+// thank-you): worried at the problem and sheepish at the correction, except where the script's
+// line wants more - puzzled that the ground isn't where it was booked and alarm at its approach
+// (script 2), pride at finding the decimal point (script 1).
+inline Mood PrankMood(unsigned scenario,unsigned beat) {
+    switch(beat) {
+        case 1:return scenario%3==2?Mood::alarmed:Mood::worried;
+        case 2:return scenario%3==1?Mood::smug:Mood::sheepish;
+        case 3:return Mood::wink;
+        default:return scenario%3==2?Mood::puzzled:Mood::smile;
+    }
+}
+void Show(std::string title,std::string message,uint64_t durationMs,bool typewriter=true,Mood mood=Mood::none);
 void Clear();
 bool Visible();
 void Draw(); // only inside the game's play-state UI pass

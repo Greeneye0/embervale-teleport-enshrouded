@@ -144,13 +144,15 @@ int main() {
      journey.tick(3100);assert(journey.needsTravel()&&journey.destination().y==high.y);
      journey.tick(100000);assert(journey.phase==Phase::ascending); // time cannot fake arrival
      journey.arrived(100000);assert(journey.message()==scenarios[scenario].opening);
-     journey.tick(114999);assert(journey.phase==Phase::scenic);
-     journey.tick(115000);assert(journey.message()==scenarios[scenario].problem);
-     journey.tick(120000);assert(journey.message()==scenarios[scenario].correction);
-     journey.tick(132000);assert(journey.needsTravel()&&journey.destination().y==p.y);
+     journey.tick(115999);assert(journey.phase==Phase::scenic);
+     journey.tick(116000);assert(journey.message()==scenarios[scenario].problem);
+     journey.tick(121999);assert(journey.phase==Phase::problem);
+     journey.tick(122000);assert(journey.message()==scenarios[scenario].correction);
+     journey.tick(134999);assert(!journey.needsTravel());
+     journey.tick(135000);assert(journey.needsTravel()&&journey.destination().y==p.y);
      assert(!journey.rememberFirstUse()&&journey.protectedFall);
      journey.restored();assert(journey.protectedFall); // premature acknowledgment ignored
-     journey.arrived(133000);assert(journey.phase==Phase::restoring);
+     journey.arrived(136000);assert(journey.phase==Phase::restoring);
      assert(!journey.rememberFirstUse());journey.restored();
      assert(journey.rememberFirstUse()&&!journey.protectedFall);
  }
@@ -171,6 +173,13 @@ int main() {
      journey.recover();assert(journey.phase==Phase::ascending);
      journey.arrived(100);journey.tick(100000);
      assert(journey.phase==Phase::complete&&!journey.rememberFirstUse());
+ }
+ {   // The prank host's reaction per script and beat.
+     using popup::Mood;using popup::PrankMood;
+     for(unsigned s=0;s<3;++s)assert(PrankMood(s,3)==Mood::wink);
+     assert(PrankMood(0,0)==Mood::smile&&PrankMood(1,0)==Mood::smile&&PrankMood(2,0)==Mood::puzzled);
+     assert(PrankMood(0,1)==Mood::worried&&PrankMood(1,1)==Mood::worried&&PrankMood(2,1)==Mood::alarmed);
+     assert(PrankMood(0,2)==Mood::sheepish&&PrankMood(1,2)==Mood::smug&&PrankMood(2,2)==Mood::sheepish);
  }
  assert(ParseSwitch(L" TRUE ",false)&&!ParseSwitch(L"Off",true));
  {   // Controller: the map's centre (as logged in game: 3218.6, 8192.1 on the 10240 m map) and button names.

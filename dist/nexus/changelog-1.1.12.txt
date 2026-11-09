@@ -1,0 +1,1 @@
+- Polished the wording and timing of some teleport notices.
