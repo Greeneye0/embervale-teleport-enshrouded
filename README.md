@@ -4,6 +4,7 @@ Open the world map, hold **Shift** and hold the **left mouse button** on a spot 
 
 - Uses the game's native travel action, not a position hack.
 - Lands on the terrain surface, and waits for unloaded terrain instead of guessing the height.
+- On a map pin (a vault, a cave, a chest, a collectible), lands at the pin itself, on the floor at its height.
 - A ring around the cursor fills while you hold. Let go early, press Esc or right-click to cancel.
 - Controller: pan the map with the left stick so the spot is in the middle, then hold **LT + RT** together for one second (`Travel` under `[Keys]` in the ini picks another, for example `Shift+Mouse1, Pad:RS+X`).
 - Single player, self-hosted and dedicated servers (the server needs the mod too).

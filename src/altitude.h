@@ -42,6 +42,14 @@ inline bool PlausibleGround(bool boundsKnown,const WorldBounds& bounds,Destinati
     if(boundsKnown&&(ground.y<=bounds.minimum.y||ground.y>=bounds.maximum.y-4*metre))return false;
     return true;
 }
+// A floor for a map pin (y = the pin's height): the ray must have started in open air, with
+// at least two metres between its start and the hit, and the hit must lie between 12 m under
+// and 3 m over the pin. Anything else (a start inside rock, a roof far above a vault's pin, a
+// drop far below it) is not the pin's floor.
+inline bool PinFloorFits(int64_t pinY,int64_t rayTop,int64_t floor){
+    constexpr int64_t metre=4294967296LL;
+    return rayTop-floor>=2*metre&&floor>=pinY-12*metre&&floor<=pinY+3*metre;
+}
 // Two ground readings on consecutive ticks must agree within half a metre.
 inline bool SameGround(int64_t a,int64_t b){constexpr int64_t half=4294967296LL/2;return (a>b?a-b:b-a)<=half;}
 // The top surface can be the floor of a narrow pit (a shaft in a ruin, a crevice) while the

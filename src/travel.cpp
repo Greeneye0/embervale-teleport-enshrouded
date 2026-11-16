@@ -45,7 +45,7 @@ bool boundsKnown=false;
 Entity entityOf{}; Dirty dirty{}; TerrainRay ray{}; Receive receive{}; Append append{};
 std::atomic<void*> client{};
 std::atomic<void*> server{};
-std::atomic<bool> hostAnswered{};
+std::atomic<bool> hostAnswered{},hostPins{};
 std::atomic<bool> paused{false},faulted{false};
 std::mutex lock;
 enum class Stage { none, resolving, injecting, armed, applying, cancelling, journey };
@@ -57,6 +57,7 @@ struct Pending {
     uint64_t retryAfter{};
     uint64_t armedAt{};bool applied{}; // when the game accepted the cast; whether its Teleport arrived
     int64_t groundY{};bool groundRead{},groundLogged{},pitChecked{};uint64_t pitSince{}; // ground confirmation, see Ground()
+    int64_t pinX{},pinY{},pinZ{}; // a map pin (pinY 0: none); Ground() looks for the floor near it first
     uint8_t transform[56]{};bool haveTransform=false;
 };
 Pending requests[16]{};
@@ -158,11 +159,59 @@ bool Opening(Pending& p,Destination first,Destination& target) {
     }
     p.pitChecked=true;return true;
 }
+// The floor in one column near a map pin's height: cast down from 2.5 m above the pin, then from
+// 4 and 6 m when that start is inside rock; the first surface PinFloorFits accepts.
+Surface PinColumn(int64_t pinY,Destination& at,const char** reason) {
+    for(double lift:{2.5,4.0,6.0}) {
+        auto probe=at;int64_t top=0;
+        auto surface=TopSurface(ray,hostWorld.terrain,hostWorld.realm,probe,reason,&top,Metres(pinY)+lift);
+        if(surface==Surface::loading)return surface;
+        if(surface!=Surface::ready||!PinFloorFits(pinY,top,probe.y))continue;
+        if(boundsKnown&&!PlausibleGround(true,bounds,probe,0))continue;
+        at=probe;return Surface::ready;
+    }
+    return Surface::invalid;
+}
+// A map pin's floor. The pin's own column first; a pin inside rock (a fossil in a cave wall, an ore
+// vein) has no open floor over it, so then rings 2 to 9 m around it, eight points each: the nearest
+// ring with a floor, and on it the floor nearest the pin's height. Always searched from the pin's
+// own spot (p.pinX/pinZ), so the second reading repeats the first. Read twice, like Ground().
+// Invalid means no usable floor near the pin; the request then lands on the top surface.
+Surface PinFloor(Pending& p,Destination& target,const char** reason) {
+    Destination pin{p.pinX,p.pinY,p.pinZ},best{};bool found=false;double away=0;
+    auto here=pin;auto surface=PinColumn(p.pinY,here,reason);
+    if(surface==Surface::loading){p.groundRead=false;return surface;}
+    if(surface==Surface::ready){best=here;found=true;}
+    for(double radius:{2.0,3.5,5.0,7.0,9.0}) {
+        if(found)break;
+        for(size_t i=0;i<8;++i) {
+            double angle=double(i)*0.78539816339744831;
+            auto point=pin;point.x+=int64_t(radius*std::cos(angle)*4294967296.0);point.z+=int64_t(radius*std::sin(angle)*4294967296.0);
+            surface=PinColumn(p.pinY,point,reason);
+            if(surface==Surface::loading){p.groundRead=false;return surface;}
+            if(surface!=Surface::ready)continue;
+            auto off=[&](const Destination& d){return d.y>p.pinY?d.y-p.pinY:p.pinY-d.y;};
+            if(!found||off(point)<off(best)){best=point;found=true;away=radius;}
+        }
+    }
+    if(!found) {
+        char line[160];sprintf_s(line,"Map Teleport: no open floor near the map pin (%.1f m, within 9 m); landing on the surface",Metres(p.pinY));Log(line);
+        target.x=p.pinX;target.z=p.pinZ;p.pinY=0;p.groundRead=false;return Surface::invalid;
+    }
+    target=best;
+    if(!p.groundRead||!SameGround(p.groundY,target.y)){p.groundRead=true;p.groundY=target.y;return Surface::checking;}
+    if(!p.groundLogged) {
+        char line[200];sprintf_s(line,"Map Teleport: map pin at %.1f m; landing on the floor at %.1f m, %.0f m from the pin",Metres(p.pinY),Metres(target.y),away);
+        Log(line);p.groundLogged=true;
+    }
+    return Surface::ready;
+}
 // The ground under p.target, checked twice before use. A hit above the world limit or at
 // the ray's start is cast again from four metres under the limit; landing above the limit
 // would send the player to their altar. Readings must agree on two consecutive ticks, so a
 // value read the moment terrain cells finish loading is never used on its own.
 Surface Ground(Pending& p,Destination& target,const char** reason=nullptr) {
+    if(p.pinY){auto surface=PinFloor(p,target,reason);if(surface!=Surface::invalid)return surface;}
     int64_t top=0;auto first=target;
     auto surface=TopSurface(ray,hostWorld.terrain,hostWorld.realm,target,reason,&top);
     if(surface==Surface::ready&&!PlausibleGround(boundsKnown,bounds,target,top)) {
@@ -197,7 +246,8 @@ bool Queue(uint32_t entity,uint64_t account,Request request) {
     for(auto& p:requests) {
         if(p.stage==Stage::none) {
             p={Stage::resolving,entity,account,request.nonce,now+30000,nullptr,request.position,settings.deluxe};
-            if(auto visit=history.find(account);visit&&!visit->complete){p.recovery=true;p.target=visit->ground;}
+            p.pinY=request.position.y>0?request.position.y:0;p.pinX=request.position.x;p.pinZ=request.position.z;
+            if(auto visit=history.find(account);visit&&!visit->complete){p.recovery=true;p.target=visit->ground;p.pinY=0;}
             Record(p,Outcome::pending);return true;
         }
     }
@@ -541,6 +591,7 @@ int HostChat(void* store,uint8_t type,uint64_t* text,uint32_t senderHandle,uint6
         auto ownHandle=at<uint32_t>(cl,0x466b44);
         if(!ownHandle||senderHandle!=ownHandle||!account)return 2;
         if(line==kHelloReply){if(!hostAnswered.exchange(true))Log("Map Teleport: host answered; remote teleport enabled");return 2;}
+        if(line==kHelloReply2){hostAnswered=true;if(!hostPins.exchange(true))Log("Map Teleport: host takes map pin targets");return 2;}
         Status status{};if(ParseStatus(line,status)) {
             std::lock_guard guard(lock);
             for(auto completed:completedRemote)if(completed&&completed==status.nonce)return 2;
@@ -558,6 +609,7 @@ int HostChat(void* store,uint8_t type,uint64_t* text,uint32_t senderHandle,uint6
     // Never relay client-supplied responses as if they originated on the host.
     if(line.starts_with("/mts1 "))return 2;
     if(line==kHello){memcpy(answer,kHelloReply.data(),kHelloReply.size());answer[kHelloReply.size()]=0;return 1;}
+    if(line==kHello2){memcpy(answer,kHelloReply2.data(),kHelloReply2.size());answer[kHelloReply2.size()]=0;return 1;}
     uint64_t nonce=0;NoticePhase phase=NoticePhase::failed;Status reply{};
     if(line.starts_with("/mtp1 ")||line.starts_with("/mta1 ")) {
         unsigned acknowledgement=0;
@@ -576,7 +628,7 @@ int HostChat(void* store,uint8_t type,uint64_t* text,uint32_t senderHandle,uint6
         for(auto result:results)if(id&&result.entity==id&&result.account==account&&result.nonce==nonce) {
             phase=PhaseOf(result.outcome);break;
         }
-    } else if(line.starts_with("/mt1 ")) {
+    } else if(line.starts_with("/mt1 ")||line.starts_with("/mt2 ")) {
         Request r;if(!ParseRequest(line,r))return 2;
         nonce=r.nonce;if(Queue(SenderEntity(account),account,r))phase=NoticePhase::waiting;
     } else return 0;
@@ -669,9 +721,10 @@ int SafeProbeTerrain(TerrainProbe* probe) {
     }
 }
 bool HostAnswered(){return hostAnswered.load();}
+bool HostTakesPins(){return hostPins.load();}
 void SetClient(void* c){
     auto previous=client.exchange(c);
-    if(previous!=c)hostAnswered=false;
+    if(previous!=c){hostAnswered=false;hostPins=false;}
     if(c){localEntity=(at<uint32_t>(c,0x466b44)&0x3f)+1;if(previous!=c){localAccount=LocalAccount();SafeBounds(at<void*>(c,0x4671d0));std::lock_guard guard(lock);remoteAccount=localAccount;}}
     else{localEntity=0;localAccount=0;std::lock_guard guard(lock);for(auto& source:probeTerrainSources)source={};if(predictedStorage&&protection::Disable(predictedStorage,predictedEntity)){predictedStorage=nullptr;predictionAck=0;}remoteStatus={};}
 }

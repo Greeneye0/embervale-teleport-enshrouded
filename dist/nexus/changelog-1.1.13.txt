@@ -1,0 +1,2 @@
+- Hold on a map pin (a vault, a cave, a chest, a collectible) and you land at the pin itself, on the floor at its height, instead of on the ground above it. A pin inside rock, like a fossil in a cave wall, lands you on the floor beside it. On a dedicated server the server needs 1.1.13 too; with The Worst Map Mod, it needs 1.3.53 or newer.
+- Keyboard hotkeys stay off while you type in The Worst Map Mod's Settings search.

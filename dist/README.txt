@@ -1,9 +1,10 @@
-EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.12
+EMBERVALE TELEPORT - MAP BASED TELEPORT  -  Enshrouded mod, version 1.1.13
 ==========================================================================
 
 Open the world map, hold Shift and hold the left mouse button on any spot for one second.
 The map closes and you travel there with the game's own teleport animation, landing on
-the ground at that spot.
+the ground at that spot. Hold on a map pin (a vault, a cave, a chest, a collectible) to land
+at the pin itself, on the floor at its height.
 
 
 INSTALL
@@ -34,7 +35,7 @@ The mod has to be on the server AND on the game of every player who wants to tel
        greeneye\map-teleport\...
 4. Start the server.
 5. Check it loaded: greeneye\loader.log in the server folder should contain
-   "Embervale Teleport 1.1.12: server companion loaded".
+   "Embervale Teleport 1.1.13: server companion loaded".
 Players: each player installs the mod on their own game as above. Players without the mod
 can still join and play; they just can't teleport, and see nothing from the mod.
 Settings: the server's own map-teleport.ini decides how teleports behave for everyone on
@@ -100,6 +101,13 @@ GOOD TO KNOW
 
 CHANGES
 -------
+1.1.13
+- Hold on a map pin (a vault, a cave, a chest, a collectible) and you land at the pin itself,
+  on the floor at its height, instead of on the ground above it. A pin inside rock, like a
+  fossil in a cave wall, lands you on the floor beside it. On a dedicated server the server
+  needs 1.1.13 too; with The Worst Map Mod, it needs 1.3.53 or newer.
+- Keyboard hotkeys stay off while you type in The Worst Map Mod's Settings search.
+
 1.1.12
 - Polished the wording and timing of some teleport notices.
 

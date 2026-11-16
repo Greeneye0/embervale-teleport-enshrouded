@@ -53,6 +53,20 @@ int main() {
  assert(request.nonce==123&&request.position.x==p.x&&request.position.z==p.z);
  for(auto bad:{"/mt1 0 1 2","/mt1 1 -1 2","/mt1 1 1 -2","/mt1 1 1 2 garbage","/mt1 1 1 2\n","/mt1 1  1 2","/mt1 1 999999999999999999999999 2","/mt1 1 429496729600001 2"})
      assert(!ParseRequest(bad,request));
+ assert(ParseRequest("/mt1 123 858993459200 3865470566400",request)&&request.position.y==0); // surface request
+ assert(ParseRequest("/mt2 7 858993459200 4294967296000 3865470566400",request)); // pin at 200, 1000, 900 m
+ assert(request.nonce==7&&request.position.x==p.x&&request.position.y==4294967296000LL&&request.position.z==p.z);
+ for(auto bad:{"/mt2 7 1 0 2","/mt2 7 1 -5 2","/mt2 7 1 2","/mt2 7 1 2 3 4","/mt2 0 1 2 3","/mt2 7 1 429496729600001 3","/mt3 7 1 2 3"})
+     assert(!ParseRequest(bad,request));
+ {   // A map pin's floor: open air above it, 12 m under to 3 m over the pin.
+     constexpr int64_t m=4294967296LL;int64_t pin=1112*m;
+     assert(PinFloorFits(pin,pin+int64_t(2.5*m),pin));            // floor right under the pin
+     assert(PinFloorFits(pin,pin+int64_t(2.5*m),pin-12*m));       // 12 m drop: still the pin's floor
+     assert(!PinFloorFits(pin,pin+int64_t(2.5*m),pin-13*m));      // further down: not
+     assert(!PinFloorFits(pin,pin+int64_t(2.5*m),pin+int64_t(2.4*m))); // ray started inside rock
+     assert(PinFloorFits(pin,pin+6*m,pin+3*m)&&!PinFloorFits(pin,pin+6*m,pin+int64_t(3.5*m))); // floor above the pin, up to 3 m
+     assert(!PinFloorFits(pin,pin+40*m,pin+31*m));                // the vault's roof
+ }
  std::vector<uint8_t> terrain(0x1c08),realm(0x3870),grid(0x180);
  Put(terrain.data(),0x1bf8,realm.data());Put<uint64_t>(terrain.data(),0x1c00,1);
  Put(realm.data(),0,grid.data());Put<uint32_t>(grid.data(),0x10,3);

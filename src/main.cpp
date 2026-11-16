@@ -8,6 +8,7 @@
 #include <string_view>
 #include <atomic>
 #include <xinput.h>
+#include <tlhelp32.h>
 #include "greeneye.h"
 #include "countdown.h"
 #include "travel.h"
@@ -76,7 +77,7 @@ HostMod CheckHost(void* client,void* currentWorld) {
     if(link.client!=client||link.world!=currentWorld||!link.deadline)link={client,currentWorld,now+3000,now+15000};
     // Ask twice (3 s and 9 s after joining), in case the first hello is lost while the world loads.
     if(link.asked<2&&now>=link.helloAt){
-        ++link.asked;link.helloAt=now+6000;SendLine(client,teleport::kHello);
+        ++link.asked;link.helloAt=now+6000;SendLine(client,teleport::kHello);SendLine(client,teleport::kHello2);
         Log(link.asked==1?"Map Teleport: asking the host whether it runs Embervale Teleport":"Map Teleport: asking the host again");
     }
     if(now<link.deadline)return HostMod::checking;
@@ -126,6 +127,51 @@ bool TravelKeyDown(bool* chord=nullptr) {
     return any;
 }
 bool CancelDown(bool pad) {return inp::KeyOfHeld(cancelBinding,Down,pad);}
+// The pin under the cursor (or under the controller's map centre), as a target with its own
+// height, so places inside vaults, caves and halls are reached instead of the ground above them.
+// The cursor slot (empty map), the map mod's stand-in slot and pins without a height (the
+// player's waypoint) are not used: those keep the surface target.
+// The Worst Map Mod picks the hovered pin itself (its own icons, and the game's with its own hit test) and clears the
+// game's hover field, so it is asked first through its MapHoveredIcon export: 1 a pin with its position, 0 none, -1 no
+// map mod with that export (then the game's hover fields count). Each loaded copy is asked (hot reload keeps old ones
+// loaded; only the running one answers 1).
+int MapModPin(teleport::Destination& out) {
+    using HoveredIcon=int(*)(double*);
+    int answer=-1;
+    HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE,GetCurrentProcessId());
+    if(snapshot==INVALID_HANDLE_VALUE)return -1;
+    MODULEENTRY32W module{};module.dwSize=sizeof module;
+    if(Module32FirstW(snapshot,&module))do {
+        auto fn=reinterpret_cast<HoveredIcon>(GetProcAddress(module.hModule,"MapHoveredIcon"));
+        if(!fn)continue;
+        if(answer<0)answer=0;
+        double xyz[3]{};
+        if(fn(xyz)==1&&std::isfinite(xyz[0])&&std::isfinite(xyz[1])&&std::isfinite(xyz[2])&&xyz[0]>=0&&xyz[1]>0&&xyz[2]>=0&&xyz[0]<100000&&xyz[1]<100000&&xyz[2]<100000) {
+            out={int64_t(xyz[0]*4294967296.0),int64_t(xyz[1]*4294967296.0),int64_t(xyz[2]*4294967296.0)};answer=1;break;
+        }
+    } while(Module32NextW(snapshot,&module));
+    CloseHandle(snapshot);
+    return answer;
+}
+bool PinTarget(uint8_t* state,teleport::Destination& out) {
+    if(int mapMod=MapModPin(out);mapMod>=0)return mapMod==1;
+    for(size_t offset:{size_t(0x28),size_t(0x20)}) {
+        auto* slot=at<uint8_t*>(state,offset);
+        if(!slot||slot==state+0x38)continue;
+        if((at<uint32_t>(slot,0)>>16)==0x7ffe)return false;
+        teleport::Destination pin{at<int64_t>(slot,0x10),at<int64_t>(slot,0x18),at<int64_t>(slot,0x20)};
+        constexpr int64_t bound=100000LL*4294967296LL;
+        if(pin.y<=0||pin.y>bound||pin.x<0||pin.z<0||pin.x>bound||pin.z>bound)return false;
+        out=pin;return true;
+    }
+    return false;
+}
+void LogStart(const char* how,const teleport::Destination& target,bool pin) {
+    char line[160];
+    if(pin)sprintf_s(line,"Map Teleport: countdown started (%s, map pin %.1f, %.1f, %.1f)",how,double(target.x)/4294967296.0,double(target.y)/4294967296.0,double(target.z)/4294967296.0);
+    else sprintf_s(line,"Map Teleport: countdown started (%s, %.1f, %.1f)",how,double(target.x)/4294967296.0,double(target.z)/4294967296.0);
+    Log(line);
+}
 bool MapFrame(void* widget,uint8_t* state) {
     if(paused||broken) return false;
     bool consecutive=seen+1==frame || seen==frame;
@@ -148,15 +194,17 @@ bool MapFrame(void* widget,uint8_t* state) {
     float zoom=at<float>(view,0x10),width=at<float>(view,0x38),height=at<float>(view,0x3c);
     if(clicked&&chord&&focused&&!countdown.active) {
         teleport::Destination target{};
-        if(teleport::Convert(x,y,ox,oy,zoom,width,height,target)) {
+        bool pin=PinTarget(state,target);
+        if(pin||teleport::Convert(x,y,ox,oy,zoom,width,height,target)) {
             countdown.start(GetTickCount64(),target); owner=state;world=currentWorld;swallow=true;
-            Log("Map Teleport: countdown started");
+            LogStart("mouse",target,pin);
         }
     } else if(pressed&&!CancelDown(true)&&!countdown.active) {
         teleport::Destination target{};
-        if(teleport::MapCentre(at<float>(view,0x30),at<float>(view,0x34),width,height,target)) {
+        bool pin=PinTarget(state,target);
+        if(pin||teleport::MapCentre(at<float>(view,0x30),at<float>(view,0x34),width,height,target)) {
             countdown.start(GetTickCount64(),target); owner=state;world=currentWorld;padHold=true;
-            {char line[120];sprintf_s(line,"Map Teleport: countdown started (controller, map centre %.1f, %.1f)",double(target.x)/4294967296.0,double(target.z)/4294967296.0);Log(line);}
+            LogStart(pin?"controller":"controller, map centre",target,pin);
         }
     }
     bool block=countdown.active||swallow;
@@ -225,7 +273,10 @@ void Dispatch(void* client,teleport::Destination target) {
         static uint64_t lastNonce=0;lastNonce=now>lastNonce?now:lastNonce+1;
         watching.nonce=lastNonce;watching.remote=true;
         teleport::travel::TrackRemote(watching.nonce,account);
-        char text[96];int len=sprintf_s(text,"/mt1 %llu %lld %lld",watching.nonce,target.x,target.z);
+        // Hosts without pin support (older Embervale Teleport) get the surface request.
+        char text[128];int len=target.y>0&&teleport::travel::HostTakesPins()?
+            sprintf_s(text,"/mt2 %llu %lld %lld %lld",watching.nonce,target.x,target.y,target.z):
+            sprintf_s(text,"/mt1 %llu %lld %lld",watching.nonce,target.x,target.z);
         if(len<=0)return;
         SendLine(client,{text,size_t(len)});
     }
@@ -364,7 +415,7 @@ GREENEYE_MOD_START {
     if(!greeneye::ClaimProcess(L"MapTeleport",host)) return false;
     if(!teleport::protection::Init(host)){Log("Map Teleport: protection bindings unavailable; disabled");return false;}
     if(!teleport::travel::Init(host)) {Log("Map Teleport: host bindings unavailable; disabled");return false;}
-    if(serverSide) {Log("Embervale Teleport 1.1.12: server companion loaded");return true;}
+    if(serverSide) {Log("Embervale Teleport 1.1.13: server companion loaded");return true;}
     auto mapTail=host->find("48 8D AC 24 A0 F8 FF FF 48 81 EC 60 08 00 00 48 8B 05",nullptr);
     auto loop=host->find("40 53 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 48 8D 81 78 4F 03 00",nullptr);
     auto send=host->find("4C 8B DC 55 56 57 49 8D AB 18 FF FF FF",nullptr);
@@ -390,7 +441,7 @@ GREENEYE_MOD_START {
     nextLoop=reinterpret_cast<LoopFn>(host->hook(loop,reinterpret_cast<void*>(LoopHook),13,nullptr,0));
     nextPlay=reinterpret_cast<LoopFn>(host->hook(play,reinterpret_cast<void*>(PlayHook),18,nullptr,0));
     if(!nextMap||!nextLoop||!nextPlay) {paused=true;Log("Map Teleport: hook installation failed");return false;}
-    Log("Embervale Teleport 1.1.12: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
+    Log("Embervale Teleport 1.1.13: Shift+hold left mouse on world map for one second; early release cancels; no release delay");return true;
 }
 // Dev tools: teleport the local player to world x / z (metres), landing like a map hold. 1 = queued.
 extern "C" __declspec(dllexport) int MapTeleportRequest(double x,double z) {

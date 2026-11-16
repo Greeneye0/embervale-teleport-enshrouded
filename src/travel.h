@@ -11,6 +11,7 @@ void TrackRemote(uint64_t nonce,uint64_t account);
 Status RemoteStatus();
 Status LocalStatus(uint32_t entity);
 unsigned ClientProtectionAck();
+// position.y above 0 is a map pin's height: the host lands on the floor under it when it finds one.
 // True means the request was queued on this process's authoritative world.
 bool Local(uint32_t entity, Destination position);
 enum class Submission { remote, queued, rejected };
@@ -20,6 +21,8 @@ void SetClient(void* client);
 bool HostsWorld();
 // True once the remote host answered kHello on the current client.
 bool HostAnswered();
+// True once the remote host answered kHello2: it takes /mt2 pin targets.
+bool HostTakesPins();
 bool Prepare();
 void Resume();
 }
